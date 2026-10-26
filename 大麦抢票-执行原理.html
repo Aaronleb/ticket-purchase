@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大麦自动抢票脚本 · 执行原理剖析</title>
+<style>
+  :root{
+    --bg:#f7f8fa;
+    --surface:#ffffff;
+    --surface-2:#f2f4f7;
+    --ink:#16181d;
+    --ink-2:#3d434e;
+    --ink-3:#6b7280;
+    --line:#e4e7ec;
+    --line-strong:#cfd5de;
+    --brand:#c8102e;
+    --brand-soft:#fdecef;
+    --brand-line:#f3c2cb;
+    --blue:#1d4ed8;
+    --blue-soft:#eef2ff;
+    --green:#0f766e;
+    --green-soft:#e8f5f3;
+    --amber:#a15c07;
+    --amber-soft:#fdf3e2;
+    --radius:12px;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.78;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---------- hero ---------- */
+  .hero{
+    background:
+      radial-gradient(1100px 420px at 12% -10%, #ffe7eb 0%, rgba(255,231,235,0) 62%),
+      radial-gradient(900px 380px at 92% 0%, #e8edff 0%, rgba(232,237,255,0) 60%),
+      var(--surface);
+    border-bottom:1px solid var(--line);
+    padding:52px 32px 34px;
+  }
+  .hero-inner{max-width:1140px;margin:0 auto}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--brand);font-weight:700;
+    background:var(--brand-soft);border:1px solid var(--brand-line);
+    padding:4px 10px;border-radius:999px;
+  }
+  h1{
+    font-size:clamp(26px,3.4vw,40px);
+    line-height:1.24;
+    margin:16px 0 10px;
+    letter-spacing:-.02em;
+    font-weight:800;
+  }
+  .hero p.sub{color:var(--ink-2);font-size:16.5px;margin:0;max-width:74ch}
+  .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+  .chip{
+    font-size:13px;color:var(--ink-2);background:var(--surface-2);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .chip b{color:var(--ink);font-weight:650}
+  .chip.accent{background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand)}
+  .chip.accent b{color:var(--brand)}
+
+  /* ---------- layout ---------- */
+  .wrap{max-width:1140px;margin:0 auto;padding:0 32px}
+  .layout{
+    display:grid;
+    grid-template-columns:250px minmax(0,1fr);
+    gap:44px;
+    padding:38px 0 80px;
+    align-items:start;
+  }
+  nav.toc{
+    position:sticky;top:24px;
+    font-size:13.5px;
+    border-left:2px solid var(--line);
+    padding-left:2px;
+  }
+  nav.toc .toc-title{
+    font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:700;padding:0 0 10px 14px;
+  }
+  nav.toc a{
+    display:block;color:var(--ink-2);
+    padding:6px 12px;margin-left:-2px;
+    border-left:2px solid transparent;
+    line-height:1.45;
+  }
+  nav.toc a:hover{color:var(--brand);text-decoration:none;background:var(--surface-2)}
+  nav.toc a.active{color:var(--brand);border-left-color:var(--brand);font-weight:650;background:var(--brand-soft)}
+  nav.toc a.sub{padding-left:26px;font-size:12.8px;color:var(--ink-3)}
+  nav.toc a.sub.active{color:var(--brand)}
+
+  main{min-width:0}
+  section{scroll-margin-top:20px;margin-bottom:56px}
+  h2{
+    font-size:23px;line-height:1.35;margin:0 0 6px;font-weight:750;
+    letter-spacing:-.01em;display:flex;align-items:baseline;gap:12px;
+  }
+  h2 .num{
+    font-family:var(--mono);font-size:13px;font-weight:700;
+    color:var(--brand);background:var(--brand-soft);
+    border:1px solid var(--brand-line);border-radius:8px;
+    padding:2px 8px;letter-spacing:.04em;flex:none;
+  }
+  h3{font-size:17px;margin:30px 0 10px;font-weight:700;letter-spacing:-.005em}
+  h3::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--brand);margin-right:9px;vertical-align:2px}
+  h3.plain::before{display:none}
+  h3.plain{color:var(--ink-2)}
+  h4{font-size:15px;margin:20px 0 8px;font-weight:700;color:var(--ink-2)}
+  p{margin:10px 0}
+  .lead{color:var(--ink-2);margin:10px 0 22px;font-size:15.6px}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:6px 0}
+  li::marker{color:var(--ink-3)}
+  strong{font-weight:700}
+  em{font-style:normal;background:linear-gradient(transparent 62%, #ffe08a 62%);padding:0 1px}
+
+  /* ---------- cards ---------- */
+  .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px 22px;box-shadow:0 1px 2px rgba(16,24,40,.04);
+    margin:16px 0;
+  }
+  .tldr{
+    background:linear-gradient(180deg,#fff,#fffafb);
+    border:1px solid var(--brand-line);
+    border-left:4px solid var(--brand);
+    border-radius:var(--radius);
+    padding:18px 22px;margin:0 0 10px;
+  }
+  .tldr h4{margin:0 0 8px;color:var(--brand);font-size:14px;letter-spacing:.04em;text-transform:uppercase}
+  .tldr ol{margin:6px 0 0;padding-left:20px}
+  .tldr li{margin:8px 0}
+
+  .callout{
+    border-radius:10px;padding:14px 18px;margin:16px 0;
+    border:1px solid var(--line);background:var(--surface-2);
+    font-size:14.6px;color:var(--ink-2);
+  }
+  .callout b{color:var(--ink)}
+  .callout.note{background:var(--blue-soft);border-color:#d5ddfb;color:#1e3a8a}
+  .callout.warn{background:var(--amber-soft);border-color:#f0dcb4;color:#7a4400}
+  .callout.risk{background:var(--brand-soft);border-color:var(--brand-line);color:#8a1024}
+  .callout .label{font-weight:750;display:block;margin-bottom:4px;letter-spacing:.02em}
+
+  /* ---------- tables ---------- */
+  .table-wrap{overflow-x:auto;margin:16px 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:14.3px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--surface-2);font-weight:700;font-size:13px;color:var(--ink-2);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafbfc}
+  td code,th code{white-space:nowrap}
+  caption{caption-side:bottom;text-align:left;padding:8px 14px;color:var(--ink-3);font-size:12.8px}
+
+  /* ---------- code ---------- */
+  code{
+    font-family:var(--mono);font-size:.88em;
+    background:var(--surface-2);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px;color:#0f172a;
+  }
+  pre{
+    margin:16px 0;background:#0f172a;color:#e2e8f0;
+    border-radius:var(--radius);padding:16px 18px;overflow-x:auto;
+    font-size:13.2px;line-height:1.72;border:1px solid #1e293b;
+    box-shadow:0 2px 8px rgba(15,23,42,.12);
+  }
+  pre code{background:none;border:none;padding:0;color:inherit;font-size:inherit;white-space:pre}
+  pre.wrap-code code{white-space:pre-wrap;overflow-wrap:anywhere}
+  pre .c{color:#7c8aa3;font-style:italic}
+  pre .k{color:#ff8fb1}
+  pre .s{color:#a5e3a0}
+  pre .f{color:#8ec7ff}
+  pre .n{color:#ffcc80}
+  .file-ref{
+    font-family:var(--mono);font-size:12.4px;color:var(--ink-3);
+    margin:-6px 0 0;letter-spacing:.01em;
+  }
+
+  /* ---------- flow diagram ---------- */
+  .flow{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px 20px;margin:18px 0;
+  }
+  .layer{
+    display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:center;
+    padding:12px 0;
+  }
+  .layer + .layer{border-top:1px dashed var(--line)}
+  .layer .l-name{
+    font-size:12.5px;font-weight:750;color:var(--ink-3);
+    letter-spacing:.06em;text-transform:uppercase;
+  }
+  .nodes{display:flex;flex-wrap:wrap;gap:10px}
+  .node{
+    border:1px solid var(--line-strong);border-radius:9px;background:var(--surface);
+    padding:9px 14px;font-size:13.6px;line-height:1.4;
+    display:flex;flex-direction:column;gap:2px;min-width:130px;
+  }
+  .node b{font-weight:700;font-size:13.6px}
+  .node span{color:var(--ink-3);font-size:12.2px;font-family:var(--mono)}
+  .node.hot{background:var(--brand-soft);border-color:var(--brand-line)}
+  .node.hot b{color:var(--brand)}
+  .node.cool{background:var(--blue-soft);border-color:#d5ddfb}
+  .node.cool b{color:#1e40af}
+  .node.soft{background:var(--surface-2)}
+  .pipe{
+    text-align:center;color:var(--ink-3);font-size:12.4px;
+    font-family:var(--mono);padding:2px 0;
+  }
+  .pipe::before{content:"↓  "}
+  .pipe::after{content:""}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12.6px;color:var(--ink-3)}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+  /* ---------- state machine ---------- */
+  .states{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}
+  .state{
+    border:1.5px solid var(--line-strong);border-radius:999px;padding:7px 16px;
+    font-size:13.4px;font-weight:650;background:var(--surface);
+  }
+  .state.on{border-color:var(--brand);color:var(--brand);background:var(--brand-soft)}
+  .arrow{color:var(--ink-3);font-family:var(--mono);font-size:13px}
+
+  /* ---------- timeline ---------- */
+  .timeline{position:relative;margin:20px 0 8px;padding-left:26px}
+  .timeline::before{
+    content:"";position:absolute;left:7px;top:8px;bottom:8px;width:2px;
+    background:linear-gradient(180deg,var(--brand-line),var(--line));
+  }
+  .tl-item{position:relative;margin-bottom:18px}
+  .tl-item::before{
+    content:"";position:absolute;left:-24px;top:7px;width:11px;height:11px;
+    border-radius:50%;background:var(--surface);border:2.5px solid var(--brand);
+  }
+  .tl-item.dim::before{border-color:var(--line-strong)}
+  .tl-time{font-family:var(--mono);font-size:12.4px;color:var(--brand);font-weight:700;letter-spacing:.03em}
+  .tl-title{font-weight:700;margin:1px 0 2px;font-size:14.8px}
+  .tl-body{color:var(--ink-2);font-size:14.2px;margin:0}
+
+  /* ---------- ladder ---------- */
+  .ladder{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+  .rung{
+    display:grid;grid-template-columns:52px 1fr;gap:12px;align-items:start;
+    background:var(--surface);border:1px solid var(--line);border-radius:10px;
+    padding:11px 14px;
+  }
+  .rung .lv{
+    font-family:var(--mono);font-size:11.6px;font-weight:700;color:var(--ink-3);
+    background:var(--surface-2);border-radius:6px;text-align:center;padding:2px 0;
+    letter-spacing:.06em;
+  }
+  .rung.hit{border-color:#bfe3dc;background:var(--green-soft)}
+  .rung.hit .lv{background:#cdeae5;color:var(--green)}
+  .rung b{font-size:14.2px}
+  .rung p{margin:3px 0 0;font-size:13.6px;color:var(--ink-2)}
+
+  /* ---------- misc ---------- */
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:16px 0}
+  .kv .item{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+  .kv .item dt{font-size:12.2px;color:var(--ink-3);letter-spacing:.02em;font-weight:700;margin:0 0 2px;font-family:var(--sans)}
+  .kv .item dd{margin:0;font-size:14.2px;font-weight:600}
+  .pill{display:inline-block;font-size:11.8px;padding:1px 8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);font-family:var(--mono)}
+  .pill.red{background:var(--brand-soft);border-color:var(--brand-line);color:var(--brand)}
+  .pill.green{background:var(--green-soft);border-color:#bfe3dc;color:var(--green)}
+
+  footer{
+    border-top:1px solid var(--line);background:var(--surface);
+    padding:28px 32px 44px;color:var(--ink-3);font-size:13px;
+  }
+  footer .wrap{max-width:1140px}
+  footer p{margin:6px 0}
+
+  @media (max-width:980px){
+    .layout{grid-template-columns:1fr;gap:24px}
+    nav.toc{position:static;border-left:none;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:12px 8px;margin-bottom:8px}
+    nav.toc .toc-title{padding-left:10px}
+    nav.toc a{border-left:none;border-radius:6px}
+    nav.toc a.active{border-left:none}
+    nav.toc a.sub{padding-left:22px}
+    .hero{padding:36px 20px 26px}
+    .wrap{padding:0 20px}
+    .layer{grid-template-columns:1fr;gap:8px}
+  }
+  @media print{
+    body{background:#fff;font-size:11.5pt}
+    nav.toc{display:none}
+    .layout{grid-template-columns:1fr;padding:0}
+    .hero{background:#fff;padding:0 0 16px}
+    section{page-break-inside:auto;margin-bottom:28px}
+    h2,h3{page-break-after:avoid}
+    pre,.table-wrap,.card,.flow{page-break-inside:avoid;box-shadow:none}
+    a{color:inherit;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <span class="eyebrow">技术剖析 · 不含业务立场</span>
+    <h1>大麦自动抢票脚本：执行原理全拆</h1>
+    <p class="sub">从 WebDriver 协议通道，到 PC 端轮询状态机、移动端手势点击加速，把这个 Python 仓库"到底怎么让网页和 APP 自己动起来"一层层拆开。</p>
+    <div class="meta">
+      <span class="chip">仓库 <b>Aaronleb / ticket-purchase</b></span>
+      <span class="chip">上游 <b>WECENG / ticket-purchase</b></span>
+      <span class="chip">语言 <b>Python</b></span>
+      <span class="chip">技术栈 <b>Selenium · Appium · UiAutomator2</b></span>
+      <span class="chip accent">分析日期 <b>2026-10-26</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="layout">
+
+    <nav class="toc" id="toc" aria-label="目录">
+      <div class="toc-title">目录</div>
+      <a href="#tldr">结论速览</a>
+      <a href="#position">1 · 项目定位</a>
+      <a href="#arch">2 · 整体架构</a>
+      <a href="#protocol">3 · 底层通道：WebDriver</a>
+      <a href="#pc">4 · PC 端执行原理</a>
+      <a href="#pc-login" class="sub">4.1 登录与会话</a>
+      <a href="#pc-state" class="sub">4.2 状态机与页面判定</a>
+      <a href="#pc-poll" class="sub">4.3 开售轮询</a>
+      <a href="#pc-select" class="sub">4.4 选项匹配</a>
+      <a href="#pc-qty" class="sub">4.5 数量与 v-model 绕过</a>
+      <a href="#pc-user" class="sub">4.6 观演人四级降级</a>
+      <a href="#pc-submit" class="sub">4.7 提交五级降级</a>
+      <a href="#mobile">5 · 移动端执行原理</a>
+      <a href="#mobile-caps" class="sub">5.1 会话与 capabilities</a>
+      <a href="#mobile-settings" class="sub">5.2 关掉隐式等待</a>
+      <a href="#mobile-tap" class="sub">5.3 坐标手势点击</a>
+      <a href="#mobile-price" class="sub">5.4 按 index 选票价</a>
+      <a href="#timeline">6 · 端到端时序</a>
+      <a href="#cheatsheet">7 · 机制速查表</a>
+      <a href="#limits">8 · 病根与局限</a>
+      <a href="#appendix">9 · 附录</a>
+    </nav>
+
+    <main>
+
+      <!-- ============ TLDR ============ -->
+      <section id="tldr">
+        <div class="tldr">
+          <h4>结论速览</h4>
+          <ol>
+            <li><b>本质是"远程操作真人界面"，不是"破解接口"。</b>脚本通过 W3C WebDriver 协议下发<code>找元素 / 点击 / 刷新</code>指令，走的是浏览器和安卓系统的官方自动化通道，没有调用大麦的下单接口，也没有处理验证码。</li>
+            <li><b>抢票的胜负手是"轮询节拍 + 命令往返次数"。</b>PC 端靠 <em>每 0.3 秒刷新一次页面、读一次按钮文案</em>来撞开售瞬间；移动端靠<em>关掉 UiAutomator2 的隐式空闲等待、改用坐标手势点击</em>，把单步延迟压到百毫秒级。</li>
+            <li><b>稳定性靠"降级链"堆出来，而不是靠契约。</b>勾观演人 4 套方法、提交订单 5 套方法、App 每个节点 3 个选择器——命中即返回，全部依赖对前端 class 名和中文文案的猜测，页面一改版就集体失效。</li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ============ 1 定位 ============ -->
+      <section id="position">
+        <h2><span class="num">01</span>项目定位</h2>
+        <p class="lead">一个跑在本机上的单账号、单设备、串行执行的 UI 自动化脚本，目标是把「开售后一秒钟内的十几次点击」交给程序完成。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th style="width:50%">它<strong>是</strong>什么</th><th>它<strong>不是</strong>什么</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>UI 层自动化：模拟人在页面上点已有按钮、卡片</td>
+                <td>不是协议逆向：没有构造下单请求、没有签名算法</td>
+              </tr>
+              <tr>
+                <td>依赖人工扫码登录，之后复用 Cookie</td>
+                <td>没有验证码识别、没有滑块破解</td>
+              </tr>
+              <tr>
+                <td>参数预置式定点狙击：城市/场次/票价/人数写死在配置里</td>
+                <td>不是"任意演出自动决策"的智能体</td>
+              </tr>
+              <tr>
+                <td>本机单进程工具，1000 余行核心逻辑</td>
+                <td>不是分布式、多账号、代理池集群</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout note">
+          <span class="label">血缘关系</span>
+          当前仓库是知名开源项目 <b>WECENG/ticket-purchase</b> 的 fork：保留上游提交历史与作者署名，在此基础上补了 <b>Appium 安卓端实现</b>（多数票只能在 APP 买）、性能参数调优、Poetry 依赖管理、pytest 骨架与中文文档。仓库本身 0 star、20 余次提交，属于个人自用/练手性质。
+        </div>
+      </section>
+
+      <!-- ============ 2 架构 ============ -->
+      <section id="arch">
+        <h2><span class="num">02</span>整体架构</h2>
+        <p class="lead">分成四层：配置意图 → 两个执行器 → 两个驱动 → 两个被控目标。上下层之间只说 WebDriver 协议这一种"语言"。</p>
+
+        <div class="flow">
+          <div class="layer">
+            <div class="l-name">配置层</div>
+            <div class="nodes">
+              <div class="node"><b>config.json</b><span>PC：target_url · users · city · dates · prices</span></div>
+              <div class="node"><b>config.jsonc</b><span>App：keyword · users · city · price_index</span></div>
+            </div>
+          </div>
+          <div class="layer">
+            <div class="l-name">执行层</div>
+            <div class="nodes">
+              <div class="node hot"><b>Concert 类</b><span>damai/concert.py · 1564 行</span></div>
+              <div class="node hot"><b>DamaiBot 类</b><span>damai_appium/damai_app_v2.py · 288 行</span></div>
+            </div>
+          </div>
+          <div class="layer">
+            <div class="l-name">驱动层</div>
+            <div class="nodes">
+              <div class="node cool"><b>chromedriver</b><span>CDP → Chrome</span></div>
+              <div class="node cool"><b>Appium + UiAutomator2</b><span>ADB 端口转发 → instrumentation</span></div>
+            </div>
+          </div>
+          <div class="layer">
+            <div class="l-name">目标层</div>
+            <div class="nodes">
+              <div class="node soft"><b>Chrome 里的 damai.cn</b><span>detail.damai.cn 详情页</span></div>
+              <div class="node soft"><b>安卓里的大麦 APP</b><span>cn.damai</span></div>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--brand-soft);border:1px solid var(--brand-line)"></i>业务编排（本项目写的部分）</span>
+            <span><i style="background:var(--blue-soft);border:1px solid #d5ddfb"></i>官方自动化驱动</span>
+            <span><i style="background:var(--surface-2);border:1px solid var(--line-strong)"></i>被控目标页面 / APP</span>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>文件</th><th>职责</th><th>关键点</th></tr></thead>
+            <tbody>
+              <tr><td><code>damai/damai.py</code></td><td>入口：校验配置 → 建会话 → 进详情页 → 开始抢</td><td>结束后挂 300 秒，留人工付款</td></tr>
+              <tr><td><code>damai/concert.py</code></td><td>PC 端全部流程、状态机、四/五级降级</td><td>核心 1564 行，页面扫描调试函数也在这</td></tr>
+              <tr><td><code>damai/check_environment.py</code></td><td>找 Chrome → 读版本 → 找/装 chromedriver</td><td>仓库里最"工程"的部分</td></tr>
+              <tr><td><code>damai_appium/damai_app_v2.py</code></td><td>App 端流程、坐标点击、重试重建会话</td><td>fork 的主要增量</td></tr>
+              <tr><td><code>damai_appium/app.md</code></td><td>V2 设计笔记与踩坑记录</td><td>解释"票价 text 为空"为何改用 index</td></tr>
+              <tr><td><code>damai/quick_diagnosis.py</code></td><td>页面元素诊断小工具</td><td>辅助定位失效时人工排查</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 3 协议 ============ -->
+      <section id="protocol">
+        <h2><span class="num">03</span>底层通道：一次点击到底发生了什么</h2>
+        <p class="lead">理解后面所有"提速技巧"的前提：<b>每个动作都是一次 HTTP 往返</b>，所以性能优化的方向只有两个——减少次数、减少每次内部的等待。</p>
+
+<pre><code><span class="c"># Python 里写的一行代码</span>
+driver.find_element(<span class="f">By.CLASS_NAME</span>, <span class="s">"buy__button__text"</span>).click()
+
+<span class="c"># 实际发生的事（W3C WebDriver 规范，HTTP + JSON）</span>
+POST /session/<span class="n">{sessionId}</span>/element        <span class="c">← 查元素，一次往返</span>
+POST /session/<span class="n">{sessionId}</span>/element/<span class="n">{eid}</span>/click  <span class="c">← 点击，再一次往返</span>
+
+<span class="c"># chromedriver 再把命令翻译成 Chrome DevTools Protocol</span>
+DOM.querySelector → Input.dispatchMouseEvent → 页面 JS 收到 onclick</code></pre>
+
+        <p>移动端同理，链路更长一层：</p>
+
+<pre><code>Python(appium) → Appium Server → ADB 端口转发 → 设备内 UiAutomator2 服务
+              → Accessibility / Instrumentation 指令 → 真实触摸事件</code></pre>
+
+        <div class="kv">
+          <div class="item"><dt>单次命令开销</dt><dd>十毫秒 ~ 百毫秒级</dd></div>
+          <div class="item"><dt>PC 一轮轮询</dt><dd>≈ 4~6 次命令往返</dd></div>
+          <div class="item"><dt>App 一次点击</dt><dd>≈ 1 次查找 + 1 次手势</dd></div>
+          <div class="item"><dt>性能上限来源</dt><dd>HTTP RTT + 驱动内部等待</dd></div>
+        </div>
+
+        <h3>会话是怎么拉起来的</h3>
+        <p>脚本不自己下载 driver，而是先调 <code>check_environment.get_chromedriver_path()</code>，四步兜底：</p>
+        <div class="ladder">
+          <div class="rung"><span class="lv">STEP 1</span><div><b>枚举 Chrome 可执行文件</b><p>Windows 走 <code>PROGRAMFILES</code>/注册表（绕过 <code>chrome.exe --version</code> 被已有会话吞掉的问题），macOS 走 <code>/Applications</code>，也支持 <code>CHROME_PATH</code> 环境变量。</p></div></div>
+          <div class="rung"><span class="lv">STEP 2</span><div><b>取主版本号</b><p>正则从 <code>Google Chrome 131.0.x</code> 中截出 <code>131</code>。</p></div></div>
+          <div class="rung"><span class="lv">STEP 3</span><div><b>枚举 chromedriver 并比对主版本</b><p>PATH、cwd、<code>/opt/homebrew/bin</code>、chromedriver-autoinstaller 缓存目录。</p></div></div>
+          <div class="rung hit"><span class="lv">STEP 4</span><div><b>不匹配则自动安装</b><p><code>chromedriver_autoinstaller.install()</code> 拉取对齐版本，返回绝对路径交给 <code>Service(path)</code>。</p></div></div>
+        </div>
+        <p class="file-ref">源码：damai/check_environment.py:285-320 · damai/concert.py:25-41</p>
+
+        <div class="callout warn">
+          <span class="label">反自动化只做了两件事</span>
+          <code>excludeSwitches: ['enable-automation']</code> 去掉地址栏"正在被自动控制"提示，<code>--disable-blink-features=AutomationControlled</code> 让 <code>navigator.webdriver</code> 不被置位。仅此而已——没有指纹伪装、行为随机化、代理池。
+        </div>
+      </section>
+
+      <!-- ============ 4 PC ============ -->
+      <section id="pc">
+        <h2><span class="num">04</span>PC 端执行原理</h2>
+        <p class="lead">一条 <code>status</code> 状态机，串起十几次点击；每一环都用"多策略降级 + 命中即返回"来换取在不确定页面上的存活率。</p>
+
+        <h3 id="pc-login">4.1 登录：Cookie 复用，而不是登录接口</h3>
+        <p>首次运行走"人工扫码 + 落盘 Cookie"：循环比对 <code>driver.title</code> 字符串来判断扫码是否完成，成功后 <code>pickle.dump(driver.get_cookies())</code> 存到 <code>damai_cookies.pkl</code>。</p>
+        <p>后续运行直接读回，逐条 <code>add_cookie</code>。这里有个必须踩过的顺序问题：</p>
+
+<pre><code>self.driver.get(self.config.target_url)   <span class="c"># ① 必须先落到 .damai.cn 域下</span>
+self.get_cookie()                        <span class="c"># ② 才能 add_cookie</span>
+<span class="c"># get_cookie() 内部：</span>
+cookie_dict = {<span class="s">'domain'</span>: <span class="s">'.damai.cn'</span>, <span class="s">'name'</span>: name, <span class="s">'value'</span>: value}</code></pre>
+
+        <p class="file-ref">damai/concert.py:43-92</p>
+        <div class="callout note">
+          <span class="label">设计缺陷（可解释"偶发登录失效"）</span>
+          保存时只取了 <code>name</code> / <code>value</code>，丢掉了 <code>path</code>、<code>expires</code>、<code>httpOnly</code>、<code>sameSite</code>；<code>domain</code> 还被硬写成 <code>.damai.cn</code>。所以它不是"标准 Cookie 持久化"，而是一次有损转存。
+        </div>
+
+        <h3 id="pc-state">4.2 状态机与页面判定</h3>
+        <div class="states">
+          <span class="state">status = 0<br><small style="font-weight:400;color:var(--ink-3)">初始化</small></span>
+          <span class="arrow">──▶</span>
+          <span class="state on">status = 2<br><small style="font-weight:400">登录成功</small></span>
+          <span class="arrow">──▶</span>
+          <span class="state">status = 3<br><small style="font-weight:400;color:var(--ink-3)">已点预订</small></span>
+        </div>
+        <p>页面处于哪个阶段，判断依据全是"文案"，没有 DOM 结构契约：</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>要判断的页面</th><th>判据</th><th>风险</th></tr></thead>
+            <tbody>
+              <tr><td>是否已进入结算页</td><td><code>title</code> 含"订单确认页" / "确认购买"，或 body 文本含"支付方式"</td><td>改文案即失效</td></tr>
+              <tr><td>是否进入选座页</td><td><code>title == '选座购买'</code></td><td>需人工点座位（脚本只死等）</td></tr>
+              <tr><td>是否还没开售</td><td>按钮文案是"提交缺货登记"</td><td>等价于"票态信号"</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="file-ref">damai/concert.py:146-155 · 237-247</p>
+
+        <h3 id="pc-poll">4.3 开售轮询：撞时间窗</h3>
+        <p>这是整个 PC 端的心脏。它不预先"定点唤醒"，而是<b>提前启动、然后无限刷新</b>，每一次刷新读一遍按钮文案：</p>
+
+<pre><code><span class="k">while</span> <span class="k">not</span> self._is_order_confirmation_page():
+    buy_button = self._get_element_text_safe(<span class="s">'buy__button__text'</span>, By.CLASS_NAME)
+
+    <span class="k">if</span> buy_button == <span class="s">"提交缺货登记"</span>:      <span class="c"># 还没开售</span>
+        self.driver.get(self.config.target_url)
+        <span class="k">continue</span>
+
+    <span class="k">for</span> text <span class="k">in</span> [<span class="s">"立即预订"</span>, <span class="s">"立即购买"</span>, <span class="s">"缺货登记"</span>, <span class="s">"选座购买"</span>]:
+        <span class="k">if</span> buy_button == text:
+            self._click_element_safe(<span class="s">'buy__button__text'</span>, By.CLASS_NAME)
+            clicked_booking = <span class="k">True</span>; <span class="k">break</span>
+
+    time.sleep(<span class="n">0.3</span> <span class="k">if</span> fast_mode <span class="k">else</span> <span class="n">1</span>)
+    self.driver.refresh()</code></pre>
+
+        <p class="file-ref">damai/concert.py:157-247</p>
+        <p>原理拆开看是三件事：</p>
+        <ul>
+          <li><b>票态信号</b> = 按钮文案。没开售时是"提交缺货登记"，开售后变"立即预订"——用文案差异代替读取任何接口返回值。</li>
+          <li><b>时间窗</b> = <code>max_retries</code>（配置里 10000）× 每轮耗时。它撑住的是"从现在到开售"的整段时间，而不是精确到毫秒的那一刻。</li>
+          <li><b>节拍</b> = <code>fast_mode ? 0.3s : 1s</code>。这个数字是命中率与服务器压力的直接权衡。</li>
+        </ul>
+
+        <div class="callout warn">
+          <span class="label">原理上的短板</span>
+          没有服务端校时（NTP）、没有预热 DNS/TLS、没有提前建立连接，也没有"到点瞬间并发点击"。所以命中率取决于<b>本地时钟误差 + 网络 RTT + 刷新节拍</b>三者之和，属于"用频率换精度"。
+        </div>
+
+        <h3 id="pc-select">4.4 选项匹配：子串包含 + 黑名单</h3>
+        <p>城市、场次、票档共用同一个匹配器：不做精确匹配，做<b>"配置值是页面文案的子串"</b>，同时跳过含"无票/缺货/售罄"的卡片。</p>
+
+<pre><code><span class="k">for</span> config_value <span class="k">in</span> config_list:              <span class="c"># 如 ["680"]</span>
+    <span class="k">for</span> element <span class="k">in</span> element_list:               <span class="c"># sku-tickets-card 下的 item-content</span>
+        <span class="k">if</span> config_value <span class="k">in</span> element.text \
+           <span class="k">and not</span> any(kw <span class="k">in</span> element.text <span class="k">for</span> kw <span class="k">in</span> [<span class="s">'无票'</span>, <span class="s">'缺货'</span>, <span class="s">'售罄'</span>]):
+            element.click(); <span class="k">return</span> <span class="k">True</span></code></pre>
+
+        <p class="file-ref">damai/concert.py:259-288</p>
+        <p>好处：页面小改（加个"周六"、加个"¥"）不影响匹配。代价：<code>"680"</code> 会命中 <code>"1680"</code>——所以配置里的价格通常要带上上下文（如 <code>"内场1199元"</code>）。</p>
+
+        <h3 id="pc-qty">4.5 数量：点加号，或者直接改 v-model</h3>
+        <p>主路径是找 <code>cafe-c-input-number</code> 的 <code>+</code> 按钮，点 <code>N-1</code> 次，然后回读输入框值做校验。主路径失败时，走一条"绕过组件"的路：</p>
+
+<pre><code>driver.execute_script(<span class="s">"""
+    arguments[0].value = '2';
+    arguments[0].dispatchEvent(new Event('input',  {bubbles:true}));
+    arguments[0].dispatchEvent(new Event('change', {bubbles:true}));
+    arguments[0]._v_model = '2';
+"""</span>, input_elem)</code></pre>
+
+        <p class="file-ref">damai/concert.py:1354-1488</p>
+        <p>这是全文最值得记住的一个原理点：<b>大麦前端是 Vue 体系，DOM 的 <code>value</code> 和组件状态是两套东西。</b> 直接改 <code>value</code> 只骗了浏览器，没骗到 <code>v-model</code>；必须手动派发 <code>input</code>/<code>change</code> 事件，让框架的回调跑一遍，状态才会同步。这就是为什么 <code>send_keys()</code> 有时无效、而"改值 + 派事件"能生效。</p>
+
+        <h3 id="pc-user">4.6 观演人勾选：四级降级</h3>
+        <p>结算页的勾选框结构一直在变，所以写成阶梯——上一级不生效才走下一级：</p>
+
+        <div class="ladder">
+          <div class="rung">
+            <span class="lv">LV 1</span>
+            <div><b>找姓名 div，再顺 DOM 轴找相邻图标</b>
+              <p><code>//div[contains(text(),'姓名')]</code> → 取文本最短/精确匹配的 div → 试 13 个候选 XPath：<code>following-sibling::*//i[contains(@class,'iconfont')]</code>、<code>../..//input[@type='checkbox']</code>、<code>..//label</code> …</p></div>
+          </div>
+          <div class="rung">
+            <span class="lv">LV 2</span>
+            <div><b>标准表单路线：label[for] ↔ checkbox</b>
+              <p>遍历 <code>label</code>，文本命中姓名 → 读 <code>for</code> 属性 → 按 id 找 checkbox → <code>is_selected()</code> 判断后点。</p></div>
+          </div>
+          <div class="rung">
+            <span class="lv">LV 3</span>
+            <div><b>直接点文本元素</b>
+              <p><code>//*[contains(text(),'姓名')]</code> 逐个尝试原生 <code>click()</code>，点文本本身，赌它被包在可点击容器里。</p></div>
+          </div>
+          <div class="rung hit">
+            <span class="lv">LV 4</span>
+            <div><b>注入 JS 完全绕过 Selenium</b>
+              <p>遍历所有 <code>div</code>，用 <code>textContent.trim() === 姓名 &amp;&amp; offsetParent !== null</code>（可见性过滤）精确定位 → 再用 JS 找 <code>nextElementSibling</code> 里的 iconfont 图标 → <code>arguments[0].click()</code>。</p></div>
+          </div>
+        </div>
+
+        <p class="file-ref">damai/concert.py:429-707</p>
+
+        <div class="callout note">
+          <span class="label">为什么到处是 <code>arguments[0].click()</code> 而不是 <code>elem.click()</code></span>
+          Selenium 原生 click 会先做"可交互性检查"：可见吗？被遮挡吗？在视口内吗？要不要滚动？SPA 里经常直接抛 <code>ElementClickInterceptedException</code>。<b>JS click 直接触发 <code>onclick</code></b>，绕过这层检查；代价是丢失真实鼠标事件序列（<code>mousedown</code>/<code>mouseup</code>），依赖这类事件的组件会失效。
+        </div>
+
+        <h3 id="pc-submit">4.7 提交订单：五级降级</h3>
+        <div class="ladder">
+          <div class="rung"><span class="lv">LV 1</span><div><b>按文本找</b><p><code>//button|div|span[contains(text(),'提交订单')]</code>，依次试"立即提交/提交订单/提交/确认/立即支付/去支付"。</p></div></div>
+          <div class="rung"><span class="lv">LV 2</span><div><b>精确匹配 + 点父节点</b><p><code>//span[text()='立即提交']</code>，成功则点它的 <code>..</code>（按钮壳通常在外层）。</p></div></div>
+          <div class="rung"><span class="lv">LV 3</span><div><b>按 view-name 属性</b><p><code>div[@view-name='TextView']//span[contains(text(),'提交')]</code>——这个属性明显来自移动端 H5 页面，PC 端基本不命中，属于"抄过来备着"。</p></div></div>
+          <div class="rung"><span class="lv">LV 4</span><div><b>按 class 名猜</b><p><code>submit-button</code> / <code>submit-btn</code> / <code>confirm-button</code> / <code>pay-button</code> / <code>bui-btn-contained</code> 逐个试。</p></div></div>
+          <div class="rung hit"><span class="lv">LV 5</span><div><b>历史绝对 XPath</b><p><code>//*[@id="dmOrderSubmitBlock_DmOrderSubmitBlock"]/div[2]/div/div[2]/div[2]/div[2]</code>——上一版页面结构的化石。</p></div></div>
+        </div>
+        <p class="file-ref">damai/concert.py:747-825</p>
+        <p>五级全挂不会硬报错，而是打印"请手动点击提交按钮"后继续——<b>把不可控的部分交还给人</b>，这也是这类脚本常见的收尾策略。</p>
+
+        <div class="kv">
+          <div class="item"><dt>fast_mode 的作用</dt><dd>sleep 压到 0.1~0.3s</dd></div>
+          <div class="item"><dt>同时跳过</dt><dd>页面扫描 + 全部 print</dd></div>
+          <div class="item"><dt>为什么 print 也算优化</dt><dd>300ms 节拍下终端 IO 是真实瓶颈</dd></div>
+          <div class="item"><dt>代价</dt><dd>失效时几乎没有可诊断信息</dd></div>
+        </div>
+      </section>
+
+      <!-- ============ 5 MOBILE ============ -->
+      <section id="mobile">
+        <h2><span class="num">05</span>移动端执行原理</h2>
+        <p class="lead">与 PC 端完全不同的加速哲学：PC 端靠"少睡多刷"，App 端靠<b>拆掉 UiAutomator2 的隐式同步机制</b>。因为多数票只能在 APP 买，这一条链路才是主战场。</p>
+
+        <h3 id="mobile-caps">5.1 会话：把会话直接开在已登录的 APP 上</h3>
+        <p><code>capabilities</code> 指定 <code>appPackage=cn.damai</code>、<code>noReset=true</code>，即<b>复用设备上已有的登录态</b>，跳过"启动 → 搜索 → 进详情页"的全部慢动作（前置条件：人工先把 APP 停在演出详情页）。同时把动画关掉、截图帧率降到 1、超时放宽，都是为了减少无关开销。</p>
+        <p class="file-ref">damai_appium/damai_app_v2.py:28-52</p>
+
+        <h3 id="mobile-settings">5.2 关键一步：关掉"等页面空闲"</h3>
+        <p>UiAutomator2 默认在每次操作后等 Accessibility 事件流"稳定"再返回——这在普通自动化里是好事，在抢票里是致命延迟。所以脚本进场第一件事就是改设置：</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>设置项</th><th>默认行为</th><th>改成</th><th>收益</th></tr></thead>
+            <tbody>
+              <tr><td><code>waitForIdleTimeout</code></td><td>等界面空闲再返回</td><td><code>0</code></td><td>不再等，直接返回</td></tr>
+              <tr><td><code>actionAcknowledgmentTimeout</code></td><td>等动作确认</td><td><code>0</code></td><td>去掉确认等待</td></tr>
+              <tr><td><code>keyInjectionDelay</code></td><td>逐字符输入间隔</td><td><code>0</code></td><td>输入零延迟</td></tr>
+              <tr><td><code>waitForSelectorTimeout</code></td><td>500ms</td><td><code>300ms</code></td><td>查找更快失败/更快返回</td></tr>
+              <tr><td><code>ignoreUnimportantViews</code></td><td>可开</td><td><code>false</code></td><td>保留完整视图树，避免元素丢失</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="file-ref">damai_appium/damai_app_v2.py:54-66</p>
+
+        <p>配套的等待策略也变了：用 <code>WebDriverWait(driver, 2)</code> + <code>presence_of_element_located</code>，<b>只等"存在"，不等"可点击"</b>——把 Selenium 的智能等待压到最短，用"后面点击失败再兜底"来换速度。</p>
+
+        <h3 id="mobile-tap">5.3 点击通道：坐标手势比元素点击快</h3>
+
+<pre><code>rect = el.rect                                  <span class="c"># 取元素矩形</span>
+x = rect[<span class="s">'x'</span>] + rect[<span class="s">'width'</span>]  // <span class="n">2</span>
+y = rect[<span class="s">'y'</span>] + rect[<span class="s">'height'</span>] // <span class="n">2</span>
+driver.execute_script(<span class="s">"mobile: clickGesture"</span>, {
+    <span class="s">"x"</span>: x, <span class="s">"y"</span>: y,
+    <span class="s">"duration"</span>: <span class="n">50</span>                            <span class="c"># 极短按压</span>
+})</code></pre>
+
+        <p class="file-ref">damai_appium/damai_app_v2.py:68-96</p>
+        <p>原理：<code>element.click()</code> 要先算可点击点、走 UiAutomator 的"可点击性"探测、再等 settle；而 <code>clickGesture</code> 是<b>直接给屏幕下发一次 30~50ms 的原生手势</b>，一跳到位。这是 Appium 场景下最有效的单点提速手段。</p>
+
+        <h4>批量勾观演人：把串行往返变成连点</h4>
+        <p>普通写法是"找 A → 点 A → 找 B → 点 B"，N 个人就是 2N 次往返。改成<b>先批量收集坐标，再连续点击，间隔 10ms</b>：</p>
+        <ol>
+          <li>遍历配置里的姓名，逐个 <code>WebDriverWait(...presence...)</code> 拿到元素并算出中心坐标，存进 <code>coordinates</code>；</li>
+          <li>再对坐标列表逐一下发 <code>clickGesture(duration:30)</code>，相邻点击只隔 0.01 秒。</li>
+        </ol>
+        <p class="file-ref">damai_appium/damai_app_v2.py:97-125</p>
+
+        <h3 id="mobile-price">5.4 一次原理性的妥协：票价按 index 选</h3>
+        <p>APP 改版后，票价卡片的 <code>text</code> 变成空串，按文案定位彻底失效。作者的解法是<b>退化成位置定位</b>：</p>
+
+<pre><code><span class="c"># 语义（text）被拿掉后，退化为「容器 + 第几个可点击子控件」</span>
+box = driver.find_element(
+    By.ID, <span class="s">'cn.damai:id/project_detail_perform_price_flowlayout'</span>)
+
+target = box.find_element(
+    AppiumBy.ANDROID_UIAUTOMATOR,
+    <span class="s">f'new UiSelector().className("android.widget.FrameLayout")'</span>
+    <span class="s">f'.index({price_index}).clickable(true)'</span>)
+
+driver.execute_script(<span class="s">'mobile: clickGesture'</span>,
+                      {<span class="s">'elementId'</span>: target.id})</code></pre>
+
+        <p class="file-ref">damai_appium/damai_app_v2.py:175-203 · 设计笔记 damai_appium/app.md</p>
+        <p>这是纯 UI 自动化绕不过去的宿命：<b>一旦前端把语义信息抽走，自动化就只能退化到位置信息</b>，而"第 5 个可点击的 FrameLayout"换一场演出就失效，因此配置里多了个要手调的 <code>price_index</code>。</p>
+
+        <h3>5.5 会话生命周期：失败就重开</h3>
+        <p><code>run_ticket_grabbing()</code> 在 <code>finally</code> 里 <code>driver.quit()</code>；<code>run_with_retry</code> 最多 3 次，每次失败后重建会话。原理：Appium 会话一旦被异常页面状态卡住（弹窗遮挡、视图树脏），最快的恢复不是"在旧会话里挣扎"，而是<b>丢掉会话重开</b>。</p>
+        <p class="file-ref">damai_appium/damai_app_v2.py:255-282</p>
+      </section>
+
+      <!-- ============ 6 时序 ============ -->
+      <section id="timeline">
+        <h2><span class="num">06</span>端到端时序</h2>
+        <p class="lead">把所有环节串成一条时间线，能清楚看到它"抢"的到底是什么：<b>不是抢网速，是抢"开售后第一次有效点击"的时间点。</b></p>
+
+        <div class="timeline">
+          <div class="tl-item">
+            <div class="tl-time">T − 60s</div>
+            <div class="tl-title">环境自检与建会话</div>
+            <p class="tl-body">找 Chrome → 比对 chromedriver 主版本 → 启动浏览器；App 侧拉起 Appium 会话并改 <code>update_settings</code>。</p>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">T − 30s</div>
+            <div class="tl-title">恢复登录态，打开目标详情页</div>
+            <p class="tl-body">PC：<code>get(target_url)</code> → <code>add_cookie</code>；App：<code>noReset</code> 直接复用登录态。</p>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">T − 20s</div>
+            <div class="tl-title">详情页预选：城市 / 场次 / 票档 / 数量</div>
+            <p class="tl-body">这些控件开售前就可点，提前选好，开售瞬间只剩"点预订"一步。匹配方式：子串包含 + 缺货售罄黑名单。</p>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">T − 0s</div>
+            <div class="tl-title">开售判定：文案翻转</div>
+            <p class="tl-body">PC 每 0.3s <code>refresh()</code> 读一次按钮文案，从"提交缺货登记"变成"立即预订"即点；App 等"预约/购买"按钮出现即点（不用刷整页）。</p>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">T + 0.3s</div>
+            <div class="tl-title">进入结算页 → 勾观演人</div>
+            <p class="tl-body">四级降级依次尝试；App 端先批量取坐标再 10ms 连点。</p>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">T + 1s</div>
+            <div class="tl-title">提交订单</div>
+            <p class="tl-body">PC 五级降级；<code>if_commit_order=true</code> 才真正下单，否则停在支付前交人工确认——"半自动"是刻意的风险控制。</p>
+          </div>
+          <div class="tl-item dim">
+            <div class="tl-time">之后</div>
+            <div class="tl-title">挂起，等人付款</div>
+            <p class="tl-body">PC 端 <code>time.sleep(300)</code> 保持页面；订单有支付超时，脚本不接管支付环节。</p>
+          </div>
+        </div>
+
+        <div class="callout warn">
+          <span class="label">它没有抢的那部分时间</span>
+          没有校时、没有预热连接、没有并发、没有重试风暴。换句话说：<b>它把"人手速"换成了"程序节拍"，但没有解决"网络与服务器侧"的排队问题</b>——真实能否买到，仍取决于大麦的排队机制和库存释放。
+        </div>
+      </section>
+
+      <!-- ============ 7 速查表 ============ -->
+      <section id="cheatsheet">
+        <h2><span class="num">07</span>机制速查表</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th style="width:15%">环节</th><th style="width:37%">实现机制</th><th style="width:34%">原理要点</th><th>位置</th></tr></thead>
+            <tbody>
+              <tr><td>环境引导</td><td>枚举路径取版本 → 比对主版本 → 自动装驱动</td><td>消除 Selenium 最常见的启动失败</td><td><code>check_environment.py:285</code></td></tr>
+              <tr><td>登录</td><td>Cookie pickle + <code>add_cookie</code> 到 <code>.damai.cn</code></td><td>必须先落到目标域，且是有损转存</td><td><code>concert.py:43</code></td></tr>
+              <tr><td>状态判定</td><td><code>title</code> / body 文案当状态机</td><td>隐式契约，改文案即崩</td><td><code>concert.py:146</code></td></tr>
+              <tr><td>开售轮询</td><td>读按钮文案 + <code>refresh()</code></td><td>用频率换精度，靠 <code>max_retries</code> 撑时间窗</td><td><code>concert.py:157</code></td></tr>
+              <tr><td>选项匹配</td><td>子串包含 + 缺货黑名单</td><td>对页面小改免疫，但会误命中（680/1680）</td><td><code>concert.py:259</code></td></tr>
+              <tr><td>数量</td><td>点 <code>+</code> N−1 次；兜底 JS 改值 + 派发事件</td><td>绕过 Vue 的 <code>v-model</code> 需要补 <code>input</code>/<code>change</code></td><td><code>concert.py:1354</code>, <code>1448</code></td></tr>
+              <tr><td>观演人</td><td>4 级降级：DOM 轴 / <code>label[for]</code> / 原生 click / JS 精确匹配</td><td>JS click 绕过可交互性检查</td><td><code>concert.py:429</code></td></tr>
+              <tr><td>提交</td><td>5 级降级：文本 / 精确 / view-name / class / 老 XPath</td><td>全部失败则交还人工</td><td><code>concert.py:747</code></td></tr>
+              <tr><td>App 会话</td><td><code>noReset</code> + <code>appPackage=cn.damai</code></td><td>复用登录态、跳过导航</td><td><code>damai_app_v2.py:28</code></td></tr>
+              <tr><td>App 提速</td><td><code>update_settings</code> 关空闲等待 + 只等存在</td><td>拆掉 UiAutomator2 的隐式同步</td><td><code>damai_app_v2.py:54</code></td></tr>
+              <tr><td>App 点击</td><td><code>el.rect</code> 算中心 → <code>mobile: clickGesture</code></td><td>一条原生手势代替"探测 + settle"</td><td><code>damai_app_v2.py:68</code></td></tr>
+              <tr><td>App 批量勾人</td><td>先收坐标 → 10ms 连点</td><td>把 2N 次往返压成 N+1</td><td><code>damai_app_v2.py:97</code></td></tr>
+              <tr><td>App 票价</td><td>容器内 <code>FrameLayout.index(i)</code></td><td>语义丢失后退化到位置定位</td><td><code>damai_app_v2.py:175</code></td></tr>
+              <tr><td>App 重试</td><td><code>quit()</code> 后重建会话</td><td>脏会话不值得救，重开更快</td><td><code>damai_app_v2.py:262</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 8 局限 ============ -->
+      <section id="limits">
+        <h2><span class="num">08</span>病根与局限</h2>
+
+        <h3 class="plain">① 把前端实现细节当成了 API</h3>
+        <p>定位依赖 <code>buy__button__text</code>、<code>sku-tickets-card</code>、<code>item-content</code> 这类 BEM 风格 class 名，以及"订单确认页""立即预订"这类中文文案。任何一个改名、改文案、改结构，整条链路就断在某个降级层。<b>作者自己在 <code>app.md</code> 里已经撞过一次墙</b>（票价 text 变空串），最后的解法是退到 index。</p>
+
+        <h3 class="plain">② 用 <code>sleep</code> 代替显式等待</h3>
+        <p>PC 端几乎全部靠固定 sleep 猜页面加载时间：睡短了元素没出来，点了空；睡长了错过窗口。正确姿势是 <code>WebDriverWait(...).until(EC.element_to_be_clickable)</code>，但那和抢票的"快"天然冲突——这是同类脚本共同的取舍。</p>
+
+        <h3 class="plain">③ 没有风控对抗，成功率不可控</h3>
+        <p>只有两条入门级反检测。面对设备指纹、行为轨迹、频控、库存排队，脚本没有任何对策；高频刷新本身还可能触发风控。<b>它不是"稳抢工具"，而是"把点击自动化"的工具。</b></p>
+
+        <h3 class="plain">④ 工程瑕疵（不影响理解原理）</h3>
+        <ul>
+          <li>模块用 <code>from concert import Concert</code> 导入，依赖当前工作目录，必须 <code>cd damai</code> 才能跑；</li>
+          <li><code>config.json</code> 按相对路径读取，路径一变即失效；</li>
+          <li>启动脚本里写死了 <code>/Users/xxx/Library/Android/sdk</code> 和某个 Poetry 虚拟环境的 python 绝对路径；</li>
+          <li><code>pyproject.toml</code> 要求 <code>--cov-fail-under=80</code>，但现有测试只覆盖环境检查与目录结构，核心抢票逻辑基本没有有效单测；</li>
+          <li>仓库里提交了真实观演人姓名（配置示例），属于个人信息，复用前应先替换并清理历史。</li>
+        </ul>
+
+        <div class="callout risk">
+          <span class="label">合规提示（技术分析不等于可用许可）</span>
+          大麦《用户协议》禁止使用外挂或自动化程序抢票，命中后订单可能被取消、账号可能受限；若用于"代抢收费/囤票转卖"，还可能触及不正当竞争与网络安全相关法规。本文只做代码原理拆解，实际使用需自行评估风险。
+        </div>
+      </section>
+
+      <!-- ============ 9 附录 ============ -->
+      <section id="appendix">
+        <h2><span class="num">09</span>附录</h2>
+
+        <h3>A. 运行方式（原样摘录，路径需自行修改）</h3>
+<pre><code><span class="c"># PC 端</span>
+cd damai &amp;&amp; python damai.py
+
+<span class="c"># App 端：先起 Appium，再跑脚本</span>
+appium --address 0.0.0.0 --port 4723 --relaxed-security
+cd damai_appium &amp;&amp; python damai_app_v2.py</code></pre>
+
+        <h3>B. 配置项含义</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>键</th><th>所属</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>target_url</code></td><td>PC</td><td>目标演出详情页，脚本的一切判断都从这个页面开始</td></tr>
+              <tr><td><code>users</code></td><td>两端</td><td><b>观演人姓名列表，长度同时决定购票张数</b></td></tr>
+              <tr><td><code>city / dates / prices</code></td><td>PC</td><td>预选参数，按"子串包含"匹配页面文案</td></tr>
+              <tr><td><code>if_commit_order</code></td><td>两端</td><td>是否自动点最后一下提交；<code>false</code> 时停在支付前</td></tr>
+              <tr><td><code>max_retries</code></td><td>PC</td><td>刷新轮询的最大轮数（决定能撑多久到开售）</td></tr>
+              <tr><td><code>fast_mode</code></td><td>PC</td><td>等待压到 0.1~0.3s、关闭扫描输出</td></tr>
+              <tr><td><code>price_index</code></td><td>App</td><td>票档在容器内第几个可点击 FrameLayout（需手调）</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>C. 想继续深入时看哪里</h3>
+        <ul>
+          <li>想看完整流程：<code>damai/concert.py</code> 的 <code>choose_ticket()</code> → <code>commit_order()</code> → <code>_select_users()</code>；</li>
+          <li>想看踩坑记录：<code>damai_appium/app.md</code>（V2 为什么这么写）；</li>
+          <li>想看视觉流程：<code>doc/大麦抢票流程.drawio</code>；</li>
+          <li>想复现环境问题：先跑 <code>damai/check_environment.py</code>。</li>
+        </ul>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p><b>大麦自动抢票脚本 · 执行原理剖析</b> — 基于仓库 <code>Aaronleb/ticket-purchase</code>（fork 自 <code>WECENG/ticket-purchase</code>）源码静态阅读整理，分析日期 2026-10-26。</p>
+    <p>文中代码片段为说明原理做了截断与简化，行号对应当前 master 分支。本文档为技术原理分析，不构成使用建议；实际使用须遵守平台协议与相关法律法规。</p>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('#toc a'));
+    var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+    if (!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        var i = targets.indexOf(e.target);
+        if (i < 0) return;
+        links.forEach(function (l) { l.classList.remove('active'); });
+        links[i].classList.add('active');
+      });
+    }, { rootMargin: '-10% 0px -78% 0px', threshold: 0 });
+    targets.forEach(function (t) { if (t) obs.observe(t); });
+  })();
+</script>
+</body>
+</html>

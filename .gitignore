@@ -179,3 +179,20 @@ credentials.json
 # Lock files (except poetry.lock)
 *.lock
 !poetry.lock
+
+# 抢票脚本本地运行时产物（driver 软链 / 隔离缓存）
+.drivers/
+damai/chromedriver
+
+# 抢票助手（本地构建产物）
+.logs/
+大麦抢票助手.app/
+tools/AppIcon.iconset/
+tools/AppIcon.icns
+
+# 账号库 / 运行目录（含登录态，勿提交）
+.data/
+.runs/
+
+# DMG 安装包（构建产物）
+大麦抢票助手-*.dmg
