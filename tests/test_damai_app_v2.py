@@ -63,6 +63,23 @@ def make_bot(mocker, if_commit_order):
     return bot
 
 
+def test_existing_price_page_skips_city_and_booking(mocker):
+    bot = make_bot(mocker, if_commit_order=False)
+
+    def find_elements(by, value):
+        if value == "cn.damai:id/project_detail_perform_price_flowlayout":
+            return [Mock()]
+        return []
+
+    bot.driver.find_elements.side_effect = find_elements
+
+    assert bot.run_ticket_grabbing() is True
+
+    bot.smart_wait_and_click.assert_not_called()
+    bot.ultra_fast_click.assert_called_once()
+    bot.ultra_batch_click.assert_called_once()
+
+
 def test_skip_submit_stops_after_selecting_users(mocker):
     bot = make_bot(mocker, if_commit_order=False)
 
@@ -80,6 +97,37 @@ def test_commit_order_clicks_submit(mocker):
     assert bot.smart_wait_and_click.call_count == 3
     submit_call = bot.smart_wait_and_click.call_args_list[2]
     assert submit_call.args[1] == 'new UiSelector().text("立即提交")'
+
+
+def test_viewer_checkbox_is_clicked_and_verified(mocker):
+    bot = make_bot(mocker, if_commit_order=False)
+    name = Mock()
+    row = Mock()
+    checkbox = Mock()
+    checkbox.id = "checkbox-id"
+    checkbox.get_attribute.side_effect = ["false", "true"]
+    name.get_attribute.return_value = "观演人"
+    bot.driver.find_element.return_value = row
+    row.find_element.return_value = checkbox
+    wait = Mock()
+    wait.until.return_value = name
+    mocker.patch("damai_appium.damai_app_v2.WebDriverWait", return_value=wait)
+
+    assert DamaiBot.ultra_batch_click(bot, [("uiautomator", "观演人")]) is True
+
+    bot.driver.execute_script.assert_called_once_with(
+        "mobile: clickGesture", {"elementId": "checkbox-id"}
+    )
+    assert bot.driver.find_element.call_count == 2
+
+
+def test_unselected_viewer_stops_before_submit(mocker):
+    bot = make_bot(mocker, if_commit_order=True)
+    bot.ultra_batch_click.return_value = False
+
+    assert bot.run_ticket_grabbing() is False
+
+    assert bot.smart_wait_and_click.call_count == 2
 
 
 def test_commit_order_fails_when_submit_button_is_not_found(mocker):

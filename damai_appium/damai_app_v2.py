@@ -98,34 +98,34 @@ class DamaiBot:
                 print(f"点击失败: {value}")
 
     def ultra_batch_click(self, elements_info, timeout=2):
-        """超快批量点击 - 带等待机制"""
-        coordinates = []
-        # 批量收集坐标，带超时等待
+        """选择观演人并确认复选框状态"""
+        selected_count = 0
         for by, value in elements_info:
             try:
-                # 等待元素出现
-                el = WebDriverWait(self.driver, timeout).until(
+                name_element = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((by, value))
                 )
-                rect = el.rect
-                x = rect['x'] + rect['width'] // 2
-                y = rect['y'] + rect['height'] // 2
-                coordinates.append((x, y, value))
+                viewer_name = name_element.get_attribute("text")
+                viewer_selector = f'//*[@resource-id="cn.damai:id/layout_main" and .//*[@resource-id="cn.damai:id/text_name" and @text="{viewer_name}"]]'
+                viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
+                checkbox = viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
+                if checkbox.get_attribute("checked") != "true":
+                    self.driver.execute_script("mobile: clickGesture", {"elementId": checkbox.id})
+                    viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
+                    checkbox = viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
+                if checkbox.get_attribute("checked") != "true":
+                    print(f"观演人未选中: {value}")
+                    return False
+                selected_count += 1
+                print(f"已选择观演人: {value}")
             except TimeoutException:
                 print(f"超时未找到用户: {value}")
+                return False
             except Exception as e:
-                print(f"查找用户失败 {value}: {e}")
-        print(f"成功找到 {len(coordinates)} 个用户")
-        # 快速连续点击
-        for i, (x, y, value) in enumerate(coordinates):
-            self.driver.execute_script("mobile: clickGesture", {
-                "x": x,
-                "y": y,
-                "duration": 30
-            })
-            if i < len(coordinates) - 1:
-                time.sleep(0.01)
-            print(f"点击用户: {value}")
+                print(f"选择用户失败 {value}: {e}")
+                return False
+        print(f"成功选择 {selected_count} 个用户")
+        return True
 
     def smart_wait_and_click(self, by, value, backup_selectors=None, timeout=1.5):
         """智能等待和点击 - 支持备用选择器"""
@@ -153,27 +153,30 @@ class DamaiBot:
             print("开始抢票流程...")
             start_time = time.time()
 
-            # 1. 城市选择 - 准备多个备选方案
-            print("选择城市...")
-            city_selectors = [
-                (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{self.config.city}")'),
-                (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().textContains("{self.config.city}")'),
-                (By.XPATH, f'//*[@text="{self.config.city}"]')
-            ]
-            if not self.smart_wait_and_click(*city_selectors[0], city_selectors[1:]):
-                print("城市选择失败")
-                return False
+            if self.driver.find_elements(By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout'):
+                print("已在票档页面，跳过城市和预约步骤...")
+            else:
+                # 1. 城市选择 - 准备多个备选方案
+                print("选择城市...")
+                city_selectors = [
+                    (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{self.config.city}")'),
+                    (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().textContains("{self.config.city}")'),
+                    (By.XPATH, f'//*[@text="{self.config.city}"]')
+                ]
+                if not self.smart_wait_and_click(*city_selectors[0], city_selectors[1:]):
+                    print("城市选择失败")
+                    return False
 
-            # 2. 点击预约按钮 - 多种可能的按钮文本
-            print("点击预约按钮...")
-            book_selectors = [
-                (By.ID, "cn.damai:id/trade_project_detail_purchase_status_bar_container_fl"),
-                (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*预约.*|.*购买.*|.*立即.*")'),
-                (By.XPATH, '//*[contains(@text,"预约") or contains(@text,"购买")]')
-            ]
-            if not self.smart_wait_and_click(*book_selectors[0], book_selectors[1:]):
-                print("预约按钮点击失败")
-                return False
+                # 2. 点击预约按钮 - 多种可能的按钮文本
+                print("点击预约按钮...")
+                book_selectors = [
+                    (By.ID, "cn.damai:id/trade_project_detail_purchase_status_bar_container_fl"),
+                    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*预约.*|.*购买.*|.*立即.*")'),
+                    (By.XPATH, '//*[contains(@text,"预约") or contains(@text,"购买")]')
+                ]
+                if not self.smart_wait_and_click(*book_selectors[0], book_selectors[1:]):
+                    print("预约按钮点击失败")
+                    return False
 
             # 3. 票价选择 - 优化查找逻辑
             print("选择票价...")
@@ -240,7 +243,9 @@ class DamaiBot:
             user_clicks = [(AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{user}")') for user in
                            self.config.users]
             # self.batch_click(user_clicks, delay=0.05)  # 极短延迟
-            self.ultra_batch_click(user_clicks)
+            if not self.ultra_batch_click(user_clicks):
+                print("观演人选择失败，停止提交")
+                return False
 
             # 7. 提交订单
             if self.config.if_commit_order:

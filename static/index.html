@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>大麦 · 抢票控制台</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="page-noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="大麦抢票控制台首页">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><strong>大麦</strong><small>TICKET CONTROL</small></span>
+    </a>
+    <div class="topbar-actions">
+      <button id="help-button" class="help-button" type="button" aria-haspopup="dialog" aria-controls="help-dialog"><span aria-hidden="true">?</span>使用说明</button>
+      <div class="local-badge"><span class="live-dot"></span>本机控制台 <code>127.0.0.1</code></div>
+    </div>
+  </header>
+
+  <main>
+    <nav id="platform-switch" class="platform-switch reveal" aria-label="抢票平台">
+      <button class="active" type="button" data-platform="pc" aria-pressed="true"><span>PC</span><small>CHROME</small></button>
+      <button type="button" data-platform="android" aria-pressed="false"><span>安卓</span><small>APPIUM</small></button>
+    </nav>
+
+    <section class="hero reveal">
+      <div class="hero-copy">
+        <p class="eyebrow">READY FOR THE OPENING</p>
+        <h1>开票之前，<br><em>准备就绪。</em></h1>
+        <p class="hero-description">一个页面完成配置、登录与启动。把紧张留给现场，把操作收进控制台。</p>
+      </div>
+      <div class="launch-panel">
+        <div class="status-line">
+          <span id="status-dot" class="status-dot"></span>
+          <div><small>当前状态</small><strong id="status-text">正在连接</strong></div>
+        </div>
+        <p id="status-message">正在读取本机服务状态…</p>
+        <div class="launch-actions">
+          <button id="start-button" class="button button-primary button-large" type="button">
+            <span id="start-label">开始 PC 抢票</span><span aria-hidden="true">↗</span>
+          </button>
+          <button id="stop-button" class="button button-stop button-large" type="button" hidden>停止任务</button>
+        </div>
+        <p class="truth-note">进程结束不等于购票成功，请以在大麦生成的订单为准。</p>
+      </div>
+      <span class="hero-index" aria-hidden="true">01</span>
+    </section>
+
+    <div class="workspace">
+      <form id="config-form" class="card config-card reveal reveal-delay-1" data-platform-panel="pc">
+        <div class="card-heading">
+          <div><p class="section-number">01 / EVENT</p><h2>演出配置</h2></div>
+          <span class="card-tag">PC · SELENIUM</span>
+        </div>
+
+        <label class="field field-full">
+          <span>演出详情页链接 <b>必填</b></span>
+          <input id="target-url" name="target_url" type="url" placeholder="https://detail.damai.cn/item.htm?id=…" autocomplete="off" required>
+        </label>
+
+        <div class="field-grid">
+          <label class="field"><span>城市</span><input id="city" type="text" placeholder="例如：杭州"></label>
+          <label class="field"><span>场次日期</span><input id="dates" type="text" placeholder="例如：2026-04-11"></label>
+          <label class="field"><span>票价</span><input id="prices" type="text" placeholder="例如：680"></label>
+          <label class="field"><span>观演人 <b>必填</b></span><input id="users" type="text" placeholder="多位观演人用逗号分隔" required></label>
+        </div>
+        <p class="field-hint">日期和票价可填写多个候选项，用逗号分隔，按填写顺序匹配。</p>
+
+        <div class="preference-row">
+          <label class="toggle-field"><input id="fast-mode" type="checkbox"><span class="toggle"></span><span><strong>快速模式</strong><small>减少等待与调试输出</small></span></label>
+          <label class="toggle-field"><input id="if-listen" type="checkbox"><span class="toggle"></span><span><strong>缺货登记</strong><small>允许触发缺货登记</small></span></label>
+          <label class="toggle-field danger-toggle"><input id="if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>启动前会再次确认</small></span></label>
+        </div>
+
+        <div class="form-footer">
+          <span id="save-state">配置保存在原项目的 damai/config.json</span>
+          <button class="button button-secondary" type="submit">保存配置</button>
+        </div>
+      </form>
+
+      <form id="android-config-form" class="card config-card reveal reveal-delay-1" data-platform-panel="android" hidden>
+        <div class="card-heading">
+          <div><p class="section-number">01 / DEVICE</p><h2>安卓配置</h2></div>
+          <span class="card-tag">ANDROID · APPIUM</span>
+        </div>
+
+        <label id="android-server-field" class="field field-full">
+          <span>Appium 服务地址 <b>必填</b></span>
+          <input id="android-server-url" type="url" placeholder="http://127.0.0.1:4723" autocomplete="off" required>
+        </label>
+
+        <div class="field-grid">
+          <label class="field"><span>设备名 <b>必填</b></span><input id="android-device-name" type="text" list="android-device-list" placeholder="连接手机后自动检测" autocomplete="off" required><datalist id="android-device-list"></datalist></label>
+          <label class="field"><span>Android 版本 <b>必填</b></span><input id="android-platform-version" type="text" placeholder="检测设备后自动填写" required></label>
+          <label class="field"><span>城市 <b>必填</b></span><input id="android-city" type="text" placeholder="例如：杭州" required></label>
+          <label class="field"><span>票档序号 <b>从 0 开始</b></span><input id="android-price-index" type="number" min="0" max="50" step="1" value="0" required></label>
+        </div>
+        <label class="field field-full android-users-field">
+          <span>观演人 <b>必填</b></span><input id="android-users" type="text" placeholder="多位观演人用逗号分隔" required>
+        </label>
+        <p id="android-device-hint" class="field-hint">票档序号对应详情页可点击票档的位置。启动前请先在手机打开目标演出详情页。</p>
+
+        <div class="preference-row android-preferences">
+          <label class="toggle-field danger-toggle"><input id="android-if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>关闭时停在订单确认页，启动前会再次确认</small></span></label>
+        </div>
+
+        <div class="form-footer">
+          <span id="android-save-state">配置保存在原项目的 damai_appium/config.jsonc</span>
+          <button class="button button-secondary" type="submit">保存配置</button>
+        </div>
+      </form>
+
+      <aside class="side-stack">
+        <section class="card operation-card reveal reveal-delay-2">
+          <div class="card-heading compact"><div><p class="section-number">02 / ACCOUNT</p><h2>账号与环境</h2></div></div>
+          <div data-platform-panel="pc">
+            <div class="account-status">
+              <div id="account-icon" class="account-icon" aria-hidden="true">DM</div>
+              <div><strong id="login-title">检查登录态</strong><p id="login-description">正在读取本机 Cookie 文件</p></div>
+            </div>
+            <button id="login-button" class="button button-outline button-block" type="button">打开扫码登录</button>
+            <button id="login-complete-button" class="button button-primary button-block" type="button" hidden>我已完成登录</button>
+          </div>
+          <div data-platform-panel="android" hidden>
+            <div class="account-status">
+              <div class="account-icon android-account-icon" aria-hidden="true">AD</div>
+              <div><strong id="android-prep-title">手动准备手机</strong><p id="android-runtime-status">安卓端不读取 PC Cookie</p></div>
+            </div>
+            <ol class="device-prep">
+              <li id="android-appium-prep">启动 Appium 服务并连接设备</li>
+              <li>在大麦 App 登录并打开目标详情页</li>
+              <li>保持手机亮屏，再启动安卓抢票</li>
+            </ol>
+            <button id="android-refresh-devices" class="button button-outline button-block" type="button">重新检测设备</button>
+          </div>
+          <div class="operation-divider"></div>
+          <button id="check-button" class="button button-outline button-block" type="button">运行环境自检</button>
+          <p id="check-hint" class="operation-hint">自检会检查 Python、Selenium、Chrome 与 ChromeDriver。</p>
+          <div id="android-check-results" class="android-check-results" role="status" hidden></div>
+        </section>
+
+        <section class="mini-card reveal reveal-delay-3">
+          <span class="mini-label">原项目路径</span>
+          <code id="project-root">读取中…</code>
+          <span id="event-connection" class="connection-state">日志连接中</span>
+        </section>
+      </aside>
+    </div>
+
+    <section class="log-section reveal reveal-delay-3">
+      <div class="log-heading">
+        <div><p class="section-number">03 / LIVE OUTPUT</p><h2>实时日志</h2></div>
+        <div class="log-tools"><span><i class="terminal-dot"></i>PROCESS OUTPUT</span><button id="clear-logs" type="button">清空显示</button></div>
+      </div>
+      <div id="logs" class="logs" role="log" aria-live="polite" aria-relevant="additions">
+        <div class="empty-log"><span>›_</span><p>暂无输出。启动自检、登录或抢票后，日志会出现在这里。</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>LOCAL ONLY · 不收集账号密码</span><span>订单结果请前往大麦确认</span></footer>
+
+  <dialog id="commit-dialog">
+    <form method="dialog">
+      <p class="section-number">CONFIRM SUBMISSION</p>
+      <h2>确认自动提交订单？</h2>
+      <p>脚本到达订单确认页后会尝试选择观演人并点击提交。请确认场次、票价与观演人配置无误。</p>
+      <div class="dialog-actions"><button class="button button-secondary" value="cancel">返回检查</button><button class="button button-primary" value="confirm">确认并启动</button></div>
+    </form>
+  </dialog>
+  <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title">
+    <div class="help-header">
+      <div><p class="section-number">QUICK GUIDE</p><h2 id="help-title">使用说明</h2></div>
+      <button id="help-close" class="dialog-close" type="button" aria-label="关闭使用说明">×</button>
+    </div>
+    <div class="help-body">
+      <ol class="guide-steps">
+        <li><span>1</span><div><h3>先检查运行环境</h3><p>点击“运行环境自检”，确认 Python、Selenium、Chrome 和 ChromeDriver 均通过。如果失败，可在实时日志中查看具体原因。</p></div></li>
+        <li><span>2</span><div><h3>完成大麦扫码登录</h3><p>点击“打开扫码登录”，在新打开的 Chrome 窗口中扫码。完成后回到本页面，点击“我已完成登录”，登录态会保存在本机。</p></div></li>
+        <li><span>3</span><div><h3>填写并保存演出配置</h3><p>粘贴大麦演出详情页链接，填写城市、日期、票价和观演人。多个日期或票价候选项用逗号分隔；观演人姓名需与大麦账号中的姓名一致。</p></div></li>
+        <li><span>4</span><div><h3>启动、停止并确认订单</h3><p>点击“开始抢票”后，页面会显示进程状态和实时日志。需要中止时点击“停止任务”。进程结束不代表购票成功，请在大麦订单中确认是否生成待支付订单，并及时完成支付。</p></div></li>
+      </ol>
+      <div class="guide-note"><strong>关于自动提交订单</strong><p>开启后，脚本到达订单确认页时会尝试自动选择观演人并提交。首次使用建议保持关闭，确认场次、票价和观演人无误后再开启。</p></div>
+      <details class="help-troubleshooting">
+        <summary>安卓端使用步骤</summary>
+        <div>
+          <h3>1. 准备 Appium 与手机</h3><p>安装 Appium、UiAutomator2 驱动和 Android SDK Platform-Tools，连接已开启 USB 调试的手机或模拟器。在终端运行 <code>appium --address 127.0.0.1 --port 4723</code>，用 <code>adb devices</code> 确认设备名。</p>
+          <h3>2. 登录并打开详情页</h3><p>在手机的官方大麦 App 中提前登录，添加观演人并打开目标演出详情页，保持手机亮屏。安卓端不使用 PC 扫码 Cookie。</p>
+          <h3>3. 保存配置并检查环境</h3><p>填写 Appium 地址、设备名、Android 版本、城市、票档序号和观演人。票档序号从 0 开始。保存后点击“检查安卓环境”，全部通过再启动。</p>
+          <h3>4. 启动并确认订单</h3><p>关闭自动提交时，脚本会停在订单确认页；开启后会尝试点击提交。两种情况下都必须在大麦 App 的订单记录中确认结果。</p>
+        </div>
+      </details>
+      <details class="help-troubleshooting">
+        <summary>常见问题与排查</summary>
+        <div>
+          <h3>点击扫码登录后没有打开 Chrome</h3><p>先运行环境自检并查看实时日志。若提示缺少 Selenium 或 ChromeDriver，请修复依赖后重试；登录进程异常退出时，页面会显示“需要处理”。</p>
+          <h3>找不到日期、票价或观演人</h3><p>检查输入是否与大麦页面一致，可为日期和票价填写多个候选格式。观演人需提前添加到大麦账号，并确保姓名完全一致。</p>
+          <h3>日志显示流程结束，但没有订单</h3><p>点击按钮或进程退出都不等于订单创建成功。请检查日志中的异常、页面跳转和观演人选择情况，最终以大麦订单记录为准。</p>
+        </div>
+      </details>
+    </div>
+    <div class="help-footer"><button id="help-done" class="button button-primary" type="button">知道了</button></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

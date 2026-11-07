@@ -195,4 +195,10 @@ tools/AppIcon.icns
 .runs/
 
 # DMG 安装包（构建产物）
-大麦抢票助手-*.dmg
+*.dmg
+docs/plans/2026-11-07-android-dmg-design.md
+docs/plans/2026-11-07-android-dmg-implementation.md
+
+# 本地 Web 控制台与桌面应用
+.runtime/
+!packaging/DamaiAndroid.spec
