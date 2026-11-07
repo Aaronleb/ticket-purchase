@@ -15,7 +15,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
-from config import Config
+try:
+    from .config import Config
+except ImportError:
+    from config import Config
 
 
 class DamaiBot:
@@ -29,8 +32,8 @@ class DamaiBot:
         """初始化驱动配置"""
         capabilities = {
             "platformName": "Android",  # 操作系统
-            "platformVersion": "16",  # 系统版本
-            "deviceName": "emulator-5554",  # 设备名称
+            "platformVersion": self.config.platform_version,  # 系统版本
+            "deviceName": self.config.device_name,  # 设备名称
             "appPackage": "cn.damai",  # app 包名
             "appActivity": ".launcher.splash.SplashMainActivity",  # app 启动 Activity
             "unicodeKeyboard": True,  # 支持 Unicode 输入
@@ -240,16 +243,21 @@ class DamaiBot:
             self.ultra_batch_click(user_clicks)
 
             # 7. 提交订单
-            print("提交订单...")
-            submit_selectors = [
-                (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().text("立即提交")'),
-                (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*提交.*|.*确认.*")'),
-                (By.XPATH, '//*[contains(@text,"提交")]')
-            ]
-            self.smart_wait_and_click(*submit_selectors[0], submit_selectors[1:])
+            if self.config.if_commit_order:
+                print("提交订单...")
+                submit_selectors = [
+                    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().text("立即提交")'),
+                    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*提交.*|.*确认.*")'),
+                    (By.XPATH, '//*[contains(@text,"提交")]')
+                ]
+                if not self.smart_wait_and_click(*submit_selectors[0], submit_selectors[1:]):
+                    print("提交订单按钮点击失败")
+                    return False
+            else:
+                print("观演人选择完成，未提交订单")
 
             end_time = time.time()
-            print(f"抢票流程完成，耗时: {end_time - start_time:.2f}秒")
+            print(f"流程结束，请在大麦 App 确认订单状态，耗时: {end_time - start_time:.2f}秒")
             return True
 
         except Exception as e:
@@ -264,7 +272,7 @@ class DamaiBot:
         for attempt in range(max_retries):
             print(f"第 {attempt + 1} 次尝试...")
             if self.run_ticket_grabbing():
-                print("抢票成功！")
+                print("流程结束，请在大麦 App 确认订单状态")
                 return True
             else:
                 print(f"第 {attempt + 1} 次尝试失败")
