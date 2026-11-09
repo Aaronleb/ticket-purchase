@@ -127,6 +127,39 @@ class AndroidApiTests(unittest.TestCase):
         finally:
             packaged.server_close()
 
+    def test_prepare_tickets_saves_config_and_returns_candidates(self):
+        report = {"ok": True, "checks": []}
+        prepared = {
+            "ticket_area": "内场",
+            "candidates": [{"index": 0, "price": 1599, "card_count": 1}],
+        }
+        with patch.object(self.server.application.android_environment, "check", return_value=report), patch(
+            "app.prepare_android_tickets", return_value=prepared
+        ) as prepare:
+            status, actual = self.request(
+                "POST", "/api/android/tickets/prepare", valid_android_config()
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(actual, prepared)
+        config, cache_path = prepare.call_args.args
+        self.assertEqual(config["ticket_area"], "内场")
+        self.assertEqual(cache_path, (self.appium_dir / "ticket_candidates.json").resolve())
+
+    def test_prepare_tickets_returns_actionable_recognition_error(self):
+        from damai_appium.ticket_selection import TicketSelectionError
+
+        report = {"ok": True, "checks": []}
+        with patch.object(self.server.application.android_environment, "check", return_value=report), patch(
+            "app.prepare_android_tickets", side_effect=TicketSelectionError("未识别到内场票档")
+        ):
+            status, error = self.request(
+                "POST", "/api/android/tickets/prepare", valid_android_config()
+            )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(error["error"], "未识别到内场票档")
+
 
 if __name__ == "__main__":
     unittest.main()

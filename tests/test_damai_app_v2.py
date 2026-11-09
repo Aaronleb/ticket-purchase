@@ -57,6 +57,7 @@ def make_bot(mocker, if_commit_order):
     bot.driver.find_elements.return_value = []
     bot.wait = Mock()
     bot.smart_wait_and_click = Mock(return_value=True)
+    bot.select_ticket = Mock(return_value=True)
     bot.ultra_fast_click = Mock(return_value=True)
     bot.ultra_batch_click = Mock()
     mocker.patch("damai_appium.damai_app_v2.time.sleep")
@@ -130,8 +131,40 @@ def test_unselected_viewer_stops_before_submit(mocker):
     assert bot.smart_wait_and_click.call_count == 2
 
 
+def test_ticket_selection_failure_stops_before_buying(mocker):
+    bot = make_bot(mocker, if_commit_order=True)
+    bot.select_ticket.return_value = False
+
+    assert bot.run_ticket_grabbing() is False
+
+    bot.ultra_fast_click.assert_not_called()
+    bot.ultra_batch_click.assert_not_called()
+
+
 def test_commit_order_fails_when_submit_button_is_not_found(mocker):
     bot = make_bot(mocker, if_commit_order=True)
     bot.smart_wait_and_click.side_effect = [True, True, False]
 
     assert bot.run_ticket_grabbing() is False
+
+
+def test_select_ticket_loads_cached_candidates_once(mocker):
+    bot = DamaiBot.__new__(DamaiBot)
+    bot.config = SimpleNamespace(ticket_area="内场")
+    bot.driver = Mock()
+    bot.ticket_candidates = None
+    candidates = [{"index": 0, "price": 1599}]
+    load = mocker.patch(
+        "damai_appium.damai_app_v2.load_prepared_tickets",
+        return_value=candidates,
+    )
+    select = mocker.patch(
+        "damai_appium.damai_app_v2.select_prepared_ticket",
+        return_value=True,
+    )
+
+    assert bot.select_ticket() is True
+    assert bot.select_ticket() is True
+    load.assert_called_once_with("ticket_candidates.json", "内场")
+    assert select.call_count == 2
+    select.assert_called_with(bot.driver, candidates)

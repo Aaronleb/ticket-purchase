@@ -19,6 +19,8 @@ DEFAULT_ANDROID_CONFIG = {
     "date": "",
     "price": "",
     "price_index": 0,
+    "ticket_area": "内场",
+    "price_strategy": "highest_available",
     "if_commit_order": False,
 }
 
@@ -73,6 +75,9 @@ def validate_android_config(payload) -> dict:
     price_index = config["price_index"]
     if isinstance(price_index, bool) or not isinstance(price_index, int) or not 0 <= price_index <= 50:
         raise ConfigError("price_index 必须是 0 到 50 之间的整数")
+    config["ticket_area"] = _required_string(config["ticket_area"], "票档区域")
+    if config["price_strategy"] != "highest_available":
+        raise ConfigError("price_strategy 仅支持 highest_available")
     if not isinstance(config["if_commit_order"], bool):
         raise ConfigError("if_commit_order 必须是布尔值")
     return config

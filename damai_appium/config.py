@@ -10,7 +10,8 @@ import json
 
 class Config:
     def __init__(self, server_url, keyword, users, city, date, price, price_index, if_commit_order,
-                 device_name='emulator-5554', platform_version='16'):
+                 device_name='emulator-5554', platform_version='16', ticket_area='内场',
+                 price_strategy='highest_available'):
         self.server_url = server_url
         self.keyword = keyword
         self.users = users
@@ -21,6 +22,8 @@ class Config:
         self.if_commit_order = if_commit_order
         self.device_name = device_name
         self.platform_version = platform_version
+        self.ticket_area = ticket_area
+        self.price_strategy = price_strategy
 
     @staticmethod
     def load_config():
@@ -35,4 +38,6 @@ class Config:
                       config['price_index'],
                       config['if_commit_order'],
                       config.get('device_name', 'emulator-5554'),
-                      config.get('platform_version', '16'))
+                      config.get('platform_version', '16'),
+                      config.get('ticket_area', '内场'),
+                      config.get('price_strategy', 'highest_available'))

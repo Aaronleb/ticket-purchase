@@ -17,8 +17,10 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 try:
     from .config import Config
+    from .ticket_selection import TicketSelectionError, load_prepared_tickets, select_prepared_ticket
 except ImportError:
     from config import Config
+    from ticket_selection import TicketSelectionError, load_prepared_tickets, select_prepared_ticket
 
 
 class DamaiBot:
@@ -26,6 +28,7 @@ class DamaiBot:
         self.config = Config.load_config()
         self.driver = None
         self.wait = None
+        self.ticket_candidates = None
         self._setup_driver()
 
     def _setup_driver(self):
@@ -147,6 +150,13 @@ class DamaiBot:
                 continue
         return False
 
+    def select_ticket(self):
+        if self.ticket_candidates is None:
+            self.ticket_candidates = load_prepared_tickets(
+                "ticket_candidates.json", self.config.ticket_area
+            )
+        return select_prepared_ticket(self.driver, self.ticket_candidates)
+
     def run_ticket_grabbing(self):
         """执行抢票主流程"""
         try:
@@ -178,35 +188,14 @@ class DamaiBot:
                     print("预约按钮点击失败")
                     return False
 
-            # 3. 票价选择 - 优化查找逻辑
+            # 3. 票价选择
             print("选择票价...")
             try:
-                # 直接尝试点击，不等待容器，实际每次都失败，只能等待
-                price_container = self.driver.find_element(By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout')
-                # price_container = self.wait.until(  # 等待找到容器
-                #     EC.presence_of_element_located((By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout')))
-                # 在容器内找 index=1 且 clickable="true" 的 FrameLayout【因为799元的票价是排在第二的，但是page里text是空的被隐藏了】
-                target_price = price_container.find_element(
-                    AppiumBy.ANDROID_UIAUTOMATOR,
-                    f'new UiSelector().className("android.widget.FrameLayout").index({self.config.price_index}).clickable(true)'
-                )
-                self.driver.execute_script('mobile: clickGesture', {'elementId': target_price.id})
-            except Exception as e:
-                print(f"票价选择失败，启动备用方案: {e}")
-                # 备用方案
-                # 先找到大容器
-                price_container = self.wait.until(
-                    EC.presence_of_element_located((By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout')))
-                # 在容器内找 index=1 且 clickable="true" 的 FrameLayout【因为799元的票价是排在第二的，但是page里text是空的被隐藏了】
-                target_price = price_container.find_element(
-                    AppiumBy.ANDROID_UIAUTOMATOR,
-                    f'new UiSelector().className("android.widget.FrameLayout").index({self.config.price_index}).clickable(true)'
-                )
-                self.driver.execute_script('mobile: clickGesture', {'elementId': target_price.id})
-
-                # if not self.ultra_fast_click(AppiumBy.ANDROID_UIAUTOMATOR,
-                #                              'new UiSelector().textMatches(".*799.*|.*\\d+元.*")'):
-                #     return False
+                if not self.select_ticket():
+                    return False
+            except TicketSelectionError as exc:
+                print(f"票档选择失败: {exc}")
+                return False
 
             # 4. 数量选择
             print("选择数量...")

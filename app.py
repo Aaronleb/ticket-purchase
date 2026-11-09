@@ -14,7 +14,9 @@ from urllib.parse import urlparse
 
 from android_config import AndroidConfigStore
 from android_environment import AndroidEnvironment
+from android_tickets import prepare_android_tickets
 from config_store import ConfigError, ConfigStore, default_project_root
+from damai_appium.ticket_selection import TicketSelectionError
 from process_manager import ProcessManager, TaskBusy, TaskError, TaskNotRunning
 
 
@@ -98,11 +100,7 @@ class WebApplication:
     def check_android(self):
         return self.android_environment.check(self.android_store.load())
 
-    def list_android_devices(self):
-        return self.android_environment.list_devices()
-
-    def start_android(self, payload):
-        config = self.android_store.save(payload)
+    def _check_android_config(self, config):
         report = self.android_environment.check(config)
         if not report["ok"]:
             failures = "；".join(
@@ -111,6 +109,21 @@ class WebApplication:
                 if not check["ok"]
             )
             raise ConfigError(f"安卓环境检查未通过：{failures}")
+
+    def list_android_devices(self):
+        return self.android_environment.list_devices()
+
+    def prepare_android(self, payload):
+        if self.manager.snapshot()["running"]:
+            raise TaskBusy("抢票任务运行中，请先停止后再识别票档")
+        config = self.android_store.save(payload)
+        self._check_android_config(config)
+        cache_path = self.android_store.config_path.with_name("ticket_candidates.json")
+        return prepare_android_tickets(config, cache_path)
+
+    def start_android(self, payload):
+        config = self.android_store.save(payload)
+        self._check_android_config(config)
         command = self.android_command or [sys.executable, "damai_app_v2.py"]
         return self.manager.start(
             "android",
@@ -206,6 +219,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.start_check())
             elif method == "POST" and path == "/api/android/check":
                 self._json(200, app.check_android())
+            elif method == "POST" and path == "/api/android/tickets/prepare":
+                self._json(200, app.prepare_android(self._read_json()))
             elif method == "POST" and path == "/api/login":
                 self._json(200, app.start_login())
             elif method == "POST" and path == "/api/login/complete":
@@ -218,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.manager.stop())
             else:
                 self._error(404, "接口不存在")
-        except ConfigError as exc:
+        except (ConfigError, TicketSelectionError) as exc:
             self._error(400, str(exc))
         except TaskBusy as exc:
             self._error(409, str(exc))

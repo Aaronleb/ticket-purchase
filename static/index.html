@@ -97,12 +97,12 @@
           <label class="field"><span>设备名 <b>必填</b></span><input id="android-device-name" type="text" list="android-device-list" placeholder="连接手机后自动检测" autocomplete="off" required><datalist id="android-device-list"></datalist></label>
           <label class="field"><span>Android 版本 <b>必填</b></span><input id="android-platform-version" type="text" placeholder="检测设备后自动填写" required></label>
           <label class="field"><span>城市 <b>必填</b></span><input id="android-city" type="text" placeholder="例如：杭州" required></label>
-          <label class="field"><span>票档序号 <b>从 0 开始</b></span><input id="android-price-index" type="number" min="0" max="50" step="1" value="0" required></label>
+          <label class="field"><span>票档区域 <b>自动识别</b></span><input id="android-ticket-area" type="text" placeholder="例如：内场" value="内场" required></label>
         </div>
         <label class="field field-full android-users-field">
           <span>观演人 <b>必填</b></span><input id="android-users" type="text" placeholder="多位观演人用逗号分隔" required>
         </label>
-        <p id="android-device-hint" class="field-hint">票档序号对应详情页可点击票档的位置。启动前请先在手机打开目标演出详情页。</p>
+        <p id="android-device-hint" class="field-hint">准备阶段自动识别一次票档，正式抢票选择该区域当前最高可购买价位，无需填写序号。</p>
 
         <div class="preference-row android-preferences">
           <label class="toggle-field danger-toggle"><input id="android-if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>关闭时停在订单确认页，启动前会再次确认</small></span></label>
@@ -136,6 +136,7 @@
               <li>保持手机亮屏，再启动安卓抢票</li>
             </ol>
             <button id="android-refresh-devices" class="button button-outline button-block" type="button">重新检测设备</button>
+            <button id="android-prepare-tickets" class="button button-outline button-block" type="button">识别并缓存票档</button>
           </div>
           <div class="operation-divider"></div>
           <button id="check-button" class="button button-outline button-block" type="button">运行环境自检</button>

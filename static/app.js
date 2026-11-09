@@ -77,7 +77,8 @@ function readAndroidConfig() {
     device_name: $("#android-device-name").value.trim(),
     platform_version: $("#android-platform-version").value.trim(),
     city: $("#android-city").value.trim(),
-    price_index: Number($("#android-price-index").value),
+    ticket_area: $("#android-ticket-area").value.trim(),
+    price_strategy: "highest_available",
     users: splitValues($("#android-users").value),
     if_commit_order: $("#android-if-commit").checked,
   };
@@ -89,7 +90,7 @@ function fillAndroidConfig(config) {
   $("#android-device-name").value = config.device_name || "";
   $("#android-platform-version").value = config.platform_version || "";
   $("#android-city").value = config.city || "";
-  $("#android-price-index").value = config.price_index ?? 0;
+  $("#android-ticket-area").value = config.ticket_area || "内场";
   $("#android-users").value = (config.users || []).join("，");
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
 }
@@ -104,9 +105,7 @@ function validateConfig(config, platform) {
   if (!config.device_name) throw new Error("请填写 adb devices 显示的设备名");
   if (!config.platform_version) throw new Error("请填写 Android 版本");
   if (!config.city) throw new Error("请填写城市");
-  if (!$("#android-price-index").value || !Number.isInteger(config.price_index) || config.price_index < 0 || config.price_index > 50) {
-    throw new Error("票档序号必须是 0 到 50 之间的整数");
-  }
+  if (!config.ticket_area) throw new Error("请填写票档区域，例如内场");
 }
 
 function setPlatform(platform, force = false) {
@@ -153,7 +152,7 @@ function updateStatus(status) {
   $("#stop-button").disabled = phase === "stopping";
   $("#login-button").hidden = phase === "waiting_login";
   $("#login-complete-button").hidden = phase !== "waiting_login";
-  for (const selector of ["#login-button", "#check-button"]) $(selector).disabled = active;
+  for (const selector of ["#login-button", "#check-button", "#android-prepare-tickets"]) $(selector).disabled = active;
   document.querySelectorAll("[data-platform]").forEach((button) => { button.disabled = active; });
   $("#start-button").disabled = active;
 
@@ -265,6 +264,33 @@ async function refreshAndroidDevices() {
 
 $("#android-device-name").addEventListener("change", (event) => selectAndroidDevice(event.target.value.trim()));
 $("#android-refresh-devices").addEventListener("click", refreshAndroidDevices);
+
+$("#android-prepare-tickets").addEventListener("click", async () => {
+  const button = $("#android-prepare-tickets");
+  const hint = $("#android-device-hint");
+  button.disabled = true;
+  button.textContent = "正在识别票档…";
+  hint.textContent = "请保持手机停在票档页面，识别过程不会点击购买或提交订单。";
+  try {
+    const config = readAndroidConfig();
+    validateConfig(config, "android");
+    const saved = await api("/api/android/config", { method: "PUT", body: JSON.stringify(config) });
+    fillAndroidConfig(saved);
+    const result = await api("/api/android/tickets/prepare", {
+      method: "POST",
+      body: JSON.stringify(saved),
+    });
+    const prices = result.candidates.map((candidate) => `${candidate.price}元`).join(" > ");
+    hint.textContent = `已缓存${result.ticket_area}候选：${prices}。开售后将按此顺序选择可购买票档。`;
+    toast("票档识别完成，候选顺序已缓存");
+  } catch (error) {
+    hint.textContent = `票档识别失败：${error.message}`;
+    toast(error.message, true);
+  } finally {
+    button.disabled = activePhases.has(currentStatus.phase);
+    button.textContent = "识别并缓存票档";
+  }
+});
 
 $("#config-form").addEventListener("submit", async (event) => {
   event.preventDefault();

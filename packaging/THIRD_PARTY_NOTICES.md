@@ -10,6 +10,7 @@
 - PyInstaller：GPLv2 或更高版本及 Bootloader 分发例外。
 - pywebview：BSD 3-Clause License，完整条款见下方。
 - PyObjC、Bottle 与 proxy_tools：MIT License。
+- RapidOCR、ONNX Runtime、OpenCV、NumPy 及其依赖：各组件随附的 Apache、MIT、BSD 等许可证。
 
 组件来源：
 

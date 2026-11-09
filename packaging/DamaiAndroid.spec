@@ -1,16 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 ROOT = Path.cwd()
 PROJECT_ROOT = ROOT
 
-hiddenimports = ["damai_appium.config", "damai_appium.damai_app_v2"]
+hiddenimports = [
+    "damai_appium.config",
+    "damai_appium.damai_app_v2",
+    "damai_appium.ticket_selection",
+    "rapidocr_onnxruntime.ch_ppocr_v3_det.text_detect",
+    "rapidocr_onnxruntime.ch_ppocr_v3_rec.text_recognize",
+    "rapidocr_onnxruntime.ch_ppocr_v2_cls.text_cls",
+]
 
 analysis = Analysis(
     [str(ROOT / "desktop_app.py")],
     pathex=[str(ROOT), str(PROJECT_ROOT)],
     binaries=[],
-    datas=[(str(ROOT / "static"), "static")],
+    datas=[
+        (str(ROOT / "static"), "static"),
+        *collect_data_files("rapidocr_onnxruntime"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
