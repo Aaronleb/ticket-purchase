@@ -1,0 +1,32 @@
+README.md
+  h_6d5d227c7546e9 69-71
+android_config.py
+  h_6d5d227c7546e9 6,26,44-60,102
+damai_appium/config.py
+  h_6d5d227c7546e9 14,27,44-45
+damai_appium/damai_app_v2.py
+  h_6d5d227c7546e9 9,11-12,19-28,38-71,75,79,122-125,128-131,179,183-247,252-307,312-315,317-318,320-336,338-341,346,349-353,356-368,372,379,381,383,385,388,390,392-396,400-416,419,422-427
+docs/superpowers/plans/2026-11-09-android-sale-scheduling.md
+  h_6d5d227c7546e9 1-570
+docs/superpowers/specs/2026-11-09-android-sale-scheduling-design.md
+  h_6d5d227c7546e9 1-103
+static/app.js
+  h_6d5d227c7546e9 81,95
+static/index.html
+  h_6d5d227c7546e9 102
+tests/test_android_config.py
+  h_6d5d227c7546e9 6-7,57-77,92-94,97
+tests/test_damai_app_v2.py
+  h_6d5d227c7546e9 2,6-9,34,38-46,70-71,76-84,88,116,124-125,157,172,197-574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "00e58412c11965d08dd682072357f90880ecc44d",
+  "prompts": {},
+  "humans": {
+    "h_6d5d227c7546e9": {
+      "author": "ext.lierbao1 <ext.lierbao1@jd.com>"
+    }
+  }
+}
