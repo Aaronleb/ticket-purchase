@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from android_config import AndroidConfigStore, validate_android_config
 from config_store import ConfigError
 
@@ -52,6 +54,27 @@ class AndroidConfigValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "城市"):
             validate_android_config(payload)
 
+    def test_sale_time_is_normalized(self):
+        payload = valid_android_config()
+        payload["sale_time"] = "2026-12-01T20:30"
+        config = validate_android_config(payload)
+        self.assertEqual(config["sale_time"], "2026-12-01T20:30:00")
+
+    def test_blank_sale_time_preserves_immediate_mode(self):
+        config = validate_android_config(valid_android_config())
+        self.assertEqual(config["sale_time"], "")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [123, "2026-02-30T20:00", "2026-12-01T20:00:00Z", "2026-12-01"],
+)
+def test_rejects_invalid_sale_time(value):
+    payload = valid_android_config()
+    payload["sale_time"] = value
+    with pytest.raises(ConfigError, match="开售时间"):
+        validate_android_config(payload)
+
 
 class AndroidConfigStoreTests(unittest.TestCase):
     def setUp(self):
@@ -66,9 +89,12 @@ class AndroidConfigStoreTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_save_and_load_round_trip(self):
-        expected = self.store.save(valid_android_config())
+        payload = valid_android_config()
+        payload["sale_time"] = "2026-12-01T20:30"
+        expected = self.store.save(payload)
         actual = self.store.load()
         self.assertEqual(actual, expected)
+        self.assertEqual(actual["sale_time"], "2026-12-01T20:30:00")
         raw = json.loads((self.appium_dir / "config.jsonc").read_text(encoding="utf-8"))
         self.assertEqual(raw["device_name"], "emulator-5554")
 

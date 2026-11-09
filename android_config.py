@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -22,6 +23,7 @@ DEFAULT_ANDROID_CONFIG = {
     "ticket_area": "内场",
     "price_strategy": "highest_available",
     "if_commit_order": False,
+    "sale_time": "",
 }
 
 
@@ -37,6 +39,23 @@ def _optional_string(value, field: str) -> str:
     if not isinstance(value, str):
         raise ConfigError(f"{field} 必须是字符串")
     return value.strip()
+
+
+def _optional_sale_time(value) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ConfigError("开售时间必须是本机日期时间字符串")
+    text = value.strip()
+    if not text:
+        return ""
+    for pattern in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            parsed = datetime.strptime(text, pattern)
+            return parsed.isoformat(timespec="seconds")
+        except ValueError:
+            pass
+    raise ConfigError("开售时间格式无效，请选择不带时区的本机日期时间")
 
 
 def validate_android_config(payload) -> dict:
@@ -80,6 +99,7 @@ def validate_android_config(payload) -> dict:
         raise ConfigError("price_strategy 仅支持 highest_available")
     if not isinstance(config["if_commit_order"], bool):
         raise ConfigError("if_commit_order 必须是布尔值")
+    config["sale_time"] = _optional_sale_time(config["sale_time"])
     return config
 
 

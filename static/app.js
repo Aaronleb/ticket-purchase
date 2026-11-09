@@ -78,6 +78,7 @@ function readAndroidConfig() {
     platform_version: $("#android-platform-version").value.trim(),
     city: $("#android-city").value.trim(),
     ticket_area: $("#android-ticket-area").value.trim(),
+    sale_time: $("#android-sale-time").value,
     price_strategy: "highest_available",
     users: splitValues($("#android-users").value),
     if_commit_order: $("#android-if-commit").checked,
@@ -91,6 +92,7 @@ function fillAndroidConfig(config) {
   $("#android-platform-version").value = config.platform_version || "";
   $("#android-city").value = config.city || "";
   $("#android-ticket-area").value = config.ticket_area || "内场";
+  $("#android-sale-time").value = config.sale_time || "";
   $("#android-users").value = (config.users || []).join("，");
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
 }
