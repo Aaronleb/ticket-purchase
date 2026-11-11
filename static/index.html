@@ -138,6 +138,11 @@
             </ol>
             <button id="android-refresh-devices" class="button button-outline button-block" type="button">重新检测设备</button>
             <button id="android-prepare-tickets" class="button button-outline button-block" type="button">识别并缓存票档</button>
+            <div id="android-layout-steps" class="layout-steps" hidden>
+              <p class="field-hint">开售前采集一次页面坐标，抢票时可直接按坐标点击，明显更快。每步只读取控件位置，不会替你点击或提交。</p>
+              <div id="android-layout-step-list" class="layout-step-list"></div>
+              <p id="android-layout-status" class="field-hint"></p>
+            </div>
           </div>
           <div class="operation-divider"></div>
           <button id="check-button" class="button button-outline button-block" type="button">运行环境自检</button>

@@ -6,6 +6,7 @@ __Description__ = "大麦app抢票自动化 - 优化版"
 __Created__ = 2025/09/13 19:27
 """
 
+import os
 import re
 import time
 from datetime import datetime
@@ -29,9 +30,29 @@ SALE_TIME_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 try:
     from .config import Config
+    from .fast_path import (
+        FastPathResult,
+        is_usable,
+        load_snapshot,
+        select_ticket_by_coords,
+        tap_at,
+        tap_viewers_by_coords,
+    )
+    from .layout_cache import LAYOUT_CACHE_NAME, LayoutCacheError
+    from .perf_probe import PerfRecorder, install as install_perf_probe
     from .ticket_selection import TicketSelectionError, load_prepared_tickets, select_prepared_ticket
 except ImportError:
     from config import Config
+    from fast_path import (
+        FastPathResult,
+        is_usable,
+        load_snapshot,
+        select_ticket_by_coords,
+        tap_at,
+        tap_viewers_by_coords,
+    )
+    from layout_cache import LAYOUT_CACHE_NAME, LayoutCacheError
+    from perf_probe import PerfRecorder, install as install_perf_probe
     from ticket_selection import TicketSelectionError, load_prepared_tickets, select_prepared_ticket
 
 
@@ -69,6 +90,11 @@ def wait_for_deadline(deadline, *, clock, sleep, keepalive):
             next_keepalive = now + 60
 
 
+def profile_enabled() -> bool:
+    """通过 DAMAI_PROFILE=1 开启命令级耗时探测，默认关闭。"""
+    return os.environ.get("DAMAI_PROFILE", "").strip() == "1"
+
+
 class DamaiBot:
     def __init__(self):
         self.config = Config.load_config()
@@ -76,7 +102,9 @@ class DamaiBot:
         self.driver = None
         self.wait = None
         self.ticket_candidates = None
+        self.layout = None
         self._submit_attempted = False
+        self.profiler = PerfRecorder() if profile_enabled() else None
         self._setup_driver()
 
     def _setup_driver(self):
@@ -85,6 +113,7 @@ class DamaiBot:
             "platformName": "Android",  # 操作系统
             "platformVersion": self.config.platform_version,  # 系统版本
             "deviceName": self.config.device_name,  # 设备名称
+            "udid": self.config.device_name,  # 与票档识别保持一致，避免多设备误连
             "appPackage": "cn.damai",  # app 包名
             "appActivity": ".launcher.splash.SplashMainActivity",  # app 启动 Activity
             "unicodeKeyboard": True,  # 支持 Unicode 输入
@@ -119,6 +148,9 @@ class DamaiBot:
         # 极短的显式等待，抢票场景下速度优先
         self.wait = WebDriverWait(self.driver, 2)  # 从5秒减少到2秒
 
+        if self.profiler is not None:
+            self.driver = install_perf_probe(self.driver, self.profiler)
+
     def _click_element(self, element):
         self.driver.execute_script("mobile: clickGesture", {"elementId": element.id})
         return True
@@ -146,17 +178,16 @@ class DamaiBot:
         selected_count = 0
         for by, value in elements_info:
             try:
-                name_element = WebDriverWait(self.driver, timeout).until(
+                # 轮询间隔与其它关键路径保持一致，默认 0.5s 会让每个观演人多等最多半秒
+                name_element = WebDriverWait(self.driver, timeout, poll_frequency=0.1).until(
                     EC.presence_of_element_located((by, value))
                 )
                 viewer_name = name_element.get_attribute("text")
                 viewer_selector = f'//*[@resource-id="cn.damai:id/layout_main" and .//*[@resource-id="cn.damai:id/text_name" and @text="{viewer_name}"]]'
-                viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
-                checkbox = viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
+                checkbox = self._viewer_checkbox(viewer_selector)
                 if checkbox.get_attribute("checked") != "true":
-                    self.driver.execute_script("mobile: clickGesture", {"elementId": checkbox.id})
-                    viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
-                    checkbox = viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
+                    self._click_element(checkbox)
+                    checkbox = self._viewer_checkbox(viewer_selector)
                 if checkbox.get_attribute("checked") != "true":
                     print(f"观演人未选中: {value}")
                     return False
@@ -170,6 +201,10 @@ class DamaiBot:
                 return False
         print(f"成功选择 {selected_count} 个用户")
         return True
+
+    def _viewer_checkbox(self, viewer_selector):
+        viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
+        return viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
 
     def smart_wait_and_click(self, by, value, backup_selectors=None, timeout=1.5):
         selectors = [(by, value)]
@@ -275,15 +310,23 @@ class DamaiBot:
             print("多位观演人需要数量选择，但当前页面没有数量区域")
             return False
 
+        # 单人多票时不再逐次查找加号：有缓存坐标就直接点，否则退回一次查找 + 逐次点击
         clicks_needed = expected - 1
-        for _ in range(clicks_needed):
-            try:
-                plus_button = self.driver.find_element(By.ID, "img_jia")
-            except NoSuchElementException:
-                print("需要增加票数，但未找到数量加号")
-                return False
-            self._click_element(plus_button)
-            time.sleep(0.02)
+        if clicks_needed:
+            cached = self._cached_quantity_point()
+            if cached is not None:
+                for _ in range(clicks_needed):
+                    tap_at(self.driver, cached)
+                    time.sleep(0.02)
+            else:
+                for _ in range(clicks_needed):
+                    try:
+                        plus_button = self.driver.find_element(By.ID, "img_jia")
+                    except NoSuchElementException:
+                        print("需要增加票数，但未找到数量加号")
+                        return False
+                    self._click_element(plus_button)
+                    time.sleep(0.02)
 
         containers = self.driver.find_elements(By.ID, "layout_num")
         if not containers:
@@ -301,10 +344,82 @@ class DamaiBot:
         print(f"数量已确认: {actual}")
         return True
 
+    def _cached_quantity_point(self):
+        """只返回缓存里的数量加号坐标；没有缓存时返回 None，由调用方走慢路径。"""
+        layout = getattr(self, "layout", None)
+        if layout is None or not layout.has("quantity_plus"):
+            return None
+        return layout.center("quantity_plus")
+
     def _log_stage(self, name, started):
         finished = time.perf_counter()
         print(f"{name}耗时: {finished - started:.3f}秒")
         return finished
+
+    # -- 坐标快路 -------------------------------------------------------
+    def _prepare_fast_path(self):
+        """开售前加载布局缓存并判断是否可用；不可用则静默降级到慢路径。"""
+        self.layout = None
+        if not getattr(self.config, "fast_mode", True):
+            print("已关闭坐标快路，使用元素查找路径")
+            return
+        snapshot = load_snapshot(LAYOUT_CACHE_NAME)
+        if snapshot is None:
+            print("没有布局缓存，使用元素查找路径（可先采集页面坐标提速）")
+            return
+        usable, reason = is_usable(self.driver, snapshot)
+        if not usable:
+            print(f"布局缓存不可用，使用元素查找路径：{reason}")
+            return
+        self.layout = snapshot
+        print(f"已启用坐标快路，缓存控件 {len(snapshot.points)} 个")
+
+    def _select_ticket_step(self):
+        """优先按缓存坐标点票档；坐标缺失或无效时回退慢路径。"""
+        layout = getattr(self, "layout", None)
+        if layout is not None:
+            result = select_ticket_by_coords(self.driver, layout, self.ticket_candidates)
+            if result.ok:
+                return True
+            print(f"坐标快路选票档不可用，降级：{result.reason}")
+        return self.select_ticket()
+
+    def _confirm_purchase_step(self):
+        """点确定购买：有缓存坐标就直接点，否则回退元素查找。"""
+        layout = getattr(self, "layout", None)
+        if layout is not None and layout.has("confirm"):
+            tap_at(self.driver, layout.center("confirm"))
+            print("已按缓存坐标点击确定购买")
+            return True
+        if not self.ultra_fast_click(By.ID, "btn_buy_view"):
+            fallback = (
+                AppiumBy.ANDROID_UIAUTOMATOR,
+                'new UiSelector().textMatches(".*确定.*|.*购买.*")',
+            )
+            if not self.ultra_fast_click(*fallback):
+                print("确定购买按钮点击失败")
+                return False
+        return True
+
+    def _select_viewers_step(self):
+        """优先按缓存坐标点观演人；缺坐标时回退元素查找。"""
+        layout = getattr(self, "layout", None)
+        if layout is not None:
+            result = tap_viewers_by_coords(
+                self.driver,
+                layout,
+                self.config.users,
+                device=getattr(self.config, "device_name", None),
+            )
+            if result.ok:
+                print(f"已按缓存坐标选择观演人: {', '.join(self.config.users)}")
+                return True
+            print(f"坐标快路选观演人不可用，降级：{result.reason}")
+        user_clicks = [
+            (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{user}")')
+            for user in self.config.users
+        ]
+        return self.ultra_batch_click(user_clicks)
 
     def run_ticket_grabbing(self):
         try:
@@ -315,7 +430,8 @@ class DamaiBot:
             validate_sale_time(getattr(self.config, "sale_time", ""))
 
             self._load_ticket_candidates()
-            stage_started = self._log_stage("票档缓存准备", stage_started)
+            self._prepare_fast_path()
+            stage_started = self._log_stage("票档与布局缓存准备", stage_started)
 
             on_price_page = bool(self.driver.find_elements(
                 By.ID, "cn.damai:id/project_detail_perform_price_flowlayout"
@@ -341,7 +457,7 @@ class DamaiBot:
             stage_started = self._log_stage("购买入口", stage_started)
 
             try:
-                if not self.select_ticket():
+                if not self._select_ticket_step():
                     return False
             except (NoSuchElementException, TicketSelectionError) as exc:
                 print(f"票档选择失败: {exc}")
@@ -352,21 +468,11 @@ class DamaiBot:
                 return False
             stage_started = self._log_stage("数量设置与校验", stage_started)
 
-            if not self.ultra_fast_click(By.ID, "btn_buy_view"):
-                fallback = (
-                    AppiumBy.ANDROID_UIAUTOMATOR,
-                    'new UiSelector().textMatches(".*确定.*|.*购买.*")',
-                )
-                if not self.ultra_fast_click(*fallback):
-                    print("确定购买按钮点击失败")
-                    return False
+            if not self._confirm_purchase_step():
+                return False
             stage_started = self._log_stage("确定购买", stage_started)
 
-            user_clicks = [
-                (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{user}")')
-                for user in self.config.users
-            ]
-            if not self.ultra_batch_click(user_clicks):
+            if not self._select_viewers_step():
                 print("观演人选择失败，停止提交")
                 return False
             stage_started = self._log_stage("观演人选择与校验", stage_started)

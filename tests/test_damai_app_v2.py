@@ -142,9 +142,7 @@ def test_viewer_checkbox_is_clicked_and_verified(mocker):
 
     assert DamaiBot.ultra_batch_click(bot, [("uiautomator", "观演人")]) is True
 
-    bot.driver.execute_script.assert_called_once_with(
-        "mobile: clickGesture", {"elementId": "checkbox-id"}
-    )
+    bot._click_element.assert_called_once_with(checkbox)
     assert bot.driver.find_element.call_count == 2
 
 
@@ -572,3 +570,146 @@ def test_session_reconnect_stops_after_three_attempts(mocker):
 
     assert bot.run_ticket_grabbing.call_count == 3
     assert bot._setup_driver.call_count == 2
+
+
+def make_fast_bot(mocker, layout, if_commit_order=True):
+    bot = make_bot(mocker, if_commit_order=if_commit_order)
+    bot.layout = layout
+    bot.config.fast_mode = True
+    bot.config.device_name = "device-1"
+    return bot
+
+
+def test_fast_path_uses_cached_ticket_coordinates(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    layout = LayoutSnapshot((1080, 2400), {"card_0": {"x": 200, "y": 300}})
+    bot = make_fast_bot(mocker, layout)
+    bot.ticket_candidates = [{"index": 0, "price": 999}]
+    bot.driver.find_elements.return_value = []
+
+    assert bot._select_ticket_step() is True
+
+    bot.driver.execute_script.assert_called_once_with(
+        "mobile: clickGesture", {"x": 200, "y": 300}
+    )
+    bot.select_ticket.assert_not_called()
+
+
+def test_fast_path_falls_back_to_slow_ticket_selection(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    layout = LayoutSnapshot((1080, 2400), {})
+    bot = make_fast_bot(mocker, layout)
+    bot.ticket_candidates = [{"index": 0, "price": 999}]
+
+    assert bot._select_ticket_step() is True
+
+    bot.select_ticket.assert_called_once()
+    bot.driver.execute_script.assert_not_called()
+
+
+def test_fast_path_skips_when_disabled(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    bot = make_fast_bot(mocker, None)
+    bot.config.fast_mode = False
+    snapshot = LayoutSnapshot((1080, 2400), {"card_0": {"x": 1, "y": 2}})
+    mocker.patch("damai_appium.damai_app_v2.load_snapshot", return_value=snapshot)
+
+    bot._prepare_fast_path()
+
+    assert bot.layout is None
+
+
+def test_fast_path_degrades_on_screen_mismatch(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    snapshot = LayoutSnapshot((1080, 2400), {"card_0": {"x": 1, "y": 2}})
+    mocker.patch("damai_appium.damai_app_v2.load_snapshot", return_value=snapshot)
+    bot = make_bot(mocker, if_commit_order=True)
+    bot.config.fast_mode = True
+    bot.driver.get_window_size.return_value = {"width": 720, "height": 1600}
+
+    bot._prepare_fast_path()
+
+    assert bot.layout is None
+
+
+def test_confirm_purchase_uses_cached_coordinates(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    layout = LayoutSnapshot((1080, 2400), {"confirm": {"x": 540, "y": 2200}})
+    bot = make_fast_bot(mocker, layout)
+
+    assert bot._confirm_purchase_step() is True
+
+    bot.driver.execute_script.assert_called_once_with(
+        "mobile: clickGesture", {"x": 540, "y": 2200}
+    )
+    bot.ultra_fast_click.assert_not_called()
+
+
+def test_confirm_purchase_falls_back_without_cache(mocker):
+    bot = make_fast_bot(mocker, None)
+
+    assert bot._confirm_purchase_step() is True
+
+    bot.ultra_fast_click.assert_called_once_with("id", "btn_buy_view")
+
+
+def test_viewers_prefer_cached_coordinates(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    layout = LayoutSnapshot((1080, 2400), {"viewer_观演人": {"x": 90, "y": 800}})
+    bot = make_fast_bot(mocker, layout)
+
+    assert bot._select_viewers_step() is True
+
+    bot.driver.execute_script.assert_called_once_with(
+        "mobile: clickGesture", {"x": 90, "y": 800}
+    )
+    bot.ultra_batch_click.assert_not_called()
+
+
+def test_viewers_fall_back_when_coordinates_missing(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    layout = LayoutSnapshot((1080, 2400), {})
+    bot = make_fast_bot(mocker, layout)
+
+    assert bot._select_viewers_step() is True
+
+    bot.ultra_batch_click.assert_called_once()
+
+
+def test_quantity_uses_cached_plus_coordinates(mocker):
+    from damai_appium.layout_cache import LayoutSnapshot
+
+    bot = make_bot(mocker, if_commit_order=False)
+    bot.config.users = ["甲", "乙"]
+    bot.layout = LayoutSnapshot((1080, 2400), {"quantity_plus": {"x": 700, "y": 1200}})
+    container = Mock()
+    container.get_attribute.return_value = "2张"
+    bot.driver.find_elements.return_value = [container]
+
+    assert DamaiBot._set_quantity(bot) is True
+
+    bot.driver.find_element.assert_not_called()
+    bot.driver.execute_script.assert_called_once_with(
+        "mobile: clickGesture", {"x": 700, "y": 1200}
+    )
+
+
+def test_quantity_without_cache_still_finds_plus(mocker):
+    bot = make_bot(mocker, if_commit_order=False)
+    bot.config.users = ["甲", "乙"]
+    bot.layout = None
+    container = Mock()
+    container.get_attribute.return_value = "2张"
+    bot.driver.find_elements.return_value = [container]
+    bot.driver.find_element.return_value = Mock()
+
+    assert DamaiBot._set_quantity(bot) is True
+
+    bot._click_element.assert_called_once()

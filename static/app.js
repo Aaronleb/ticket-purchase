@@ -155,6 +155,7 @@ function updateStatus(status) {
   $("#login-button").hidden = phase === "waiting_login";
   $("#login-complete-button").hidden = phase !== "waiting_login";
   for (const selector of ["#login-button", "#check-button", "#android-prepare-tickets"]) $(selector).disabled = active;
+  document.querySelectorAll("#android-layout-step-list button").forEach((button) => { button.disabled = active; });
   document.querySelectorAll("[data-platform]").forEach((button) => { button.disabled = active; });
   $("#start-button").disabled = active;
 
@@ -429,6 +430,62 @@ function connectEvents() {
   });
 }
 
+let layoutSteps = [];
+const layoutDone = new Set();
+
+function renderLayoutSteps() {
+  const container = $("#android-layout-step-list");
+  container.replaceChildren();
+  $("#android-layout-steps").hidden = !layoutSteps.length;
+  for (const step of layoutSteps) {
+    const item = document.createElement("div");
+    item.className = `layout-step${layoutDone.has(step.key) ? " done" : ""}`;
+    const title = document.createElement("strong");
+    title.textContent = `${step.title}${layoutDone.has(step.key) ? " ✓" : ""}`;
+    const hint = document.createElement("small");
+    hint.textContent = step.hint;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button-outline";
+    button.textContent = layoutDone.has(step.key) ? "重新采集" : "采集这一步";
+    button.addEventListener("click", () => captureLayoutStep(step, button));
+    item.append(title, hint, button);
+    container.append(item);
+  }
+}
+
+async function captureLayoutStep(step, button) {
+  button.disabled = true;
+  button.textContent = "采集中…";
+  $("#android-layout-status").textContent = `正在读取「${step.title}」控件位置…`;
+  try {
+    const result = await api("/api/android/layout/capture", {
+      method: "POST",
+      body: JSON.stringify({ step: step.key }),
+    });
+    layoutDone.add(step.key);
+    renderLayoutSteps();
+    $("#android-layout-status").textContent = `「${step.title}」已采集 ${Object.keys(result.captured).length} 个控件，累计 ${result.total_points} 个。`;
+    toast(`已采集${step.title}坐标`);
+  } catch (error) {
+    $("#android-layout-status").textContent = `采集失败：${error.message}`;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = layoutDone.has(step.key) ? "重新采集" : "采集这一步";
+  }
+}
+
+async function loadLayoutSteps() {
+  try {
+    const payload = await api("/api/android/layout/steps");
+    layoutSteps = payload.steps || [];
+  } catch (error) {
+    layoutSteps = [];
+  }
+  renderLayoutSteps();
+}
+
 async function initializeAndroid() {
   try {
     fillAndroidConfig(await api("/api/android/config"));
@@ -437,6 +494,7 @@ async function initializeAndroid() {
     $("#android-save-state").textContent = `安卓配置加载失败：${error.message}`;
   }
   await refreshAndroidDevices();
+  await loadLayoutSteps();
 }
 
 async function initialize() {

@@ -23,6 +23,7 @@ DEFAULT_ANDROID_CONFIG = {
     "ticket_area": "内场",
     "price_strategy": "highest_available",
     "if_commit_order": False,
+    "fast_mode": True,
     "sale_time": "",
 }
 
@@ -99,6 +100,8 @@ def validate_android_config(payload) -> dict:
         raise ConfigError("price_strategy 仅支持 highest_available")
     if not isinstance(config["if_commit_order"], bool):
         raise ConfigError("if_commit_order 必须是布尔值")
+    if not isinstance(config["fast_mode"], bool):
+        raise ConfigError("fast_mode 必须是布尔值")
     config["sale_time"] = _optional_sale_time(config["sale_time"])
     return config
 

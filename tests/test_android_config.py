@@ -120,3 +120,19 @@ class AndroidConfigStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_fast_mode_defaults_to_on_and_is_boolean():
+    payload = valid_android_config()
+    config = validate_android_config(payload)
+    assert config["fast_mode"] is True
+
+    payload["fast_mode"] = False
+    assert validate_android_config(payload)["fast_mode"] is False
+
+
+def test_fast_mode_rejects_non_boolean():
+    payload = valid_android_config()
+    payload["fast_mode"] = "yes"
+    with pytest.raises(ConfigError, match="fast_mode"):
+        validate_android_config(payload)

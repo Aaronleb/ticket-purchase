@@ -142,9 +142,10 @@ class AndroidApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(actual, prepared)
-        config, cache_path = prepare.call_args.args
+        config, cache_path, layout_path = prepare.call_args.args
         self.assertEqual(config["ticket_area"], "内场")
         self.assertEqual(cache_path, (self.appium_dir / "ticket_candidates.json").resolve())
+        self.assertEqual(layout_path, (self.appium_dir / "layout_cache.json").resolve())
 
     def test_prepare_tickets_returns_actionable_recognition_error(self):
         from damai_appium.ticket_selection import TicketSelectionError

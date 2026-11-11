@@ -9,6 +9,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 
+try:
+    from .layout_cache import center_of_rect
+except ImportError:
+    from layout_cache import center_of_rect
+
+
 SOLD_OUT_WORDS = ("缺货", "售罄", "无票", "缺票")
 
 
@@ -123,6 +129,7 @@ class TicketPreparation:
                 "price": extract_price(text),
                 "available": card_is_available(card, text),
                 "card_count": len(cards),
+                "bounds": center_of_rect(rect),
             }
             tickets.append(ticket)
             print(f"票档识别 {index}: {text or '未识别'}；价格={ticket['price']}；可购买={ticket['available']}")

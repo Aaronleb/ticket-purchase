@@ -14,8 +14,9 @@ from urllib.parse import urlparse
 
 from android_config import AndroidConfigStore
 from android_environment import AndroidEnvironment
-from android_tickets import prepare_android_tickets
+from android_tickets import capture_android_layout, layout_steps, prepare_android_tickets
 from config_store import ConfigError, ConfigStore, default_project_root
+from damai_appium.layout_cache import LAYOUT_CACHE_NAME, LayoutCacheError
 from damai_appium.ticket_selection import TicketSelectionError
 from process_manager import ProcessManager, TaskBusy, TaskError, TaskNotRunning
 
@@ -119,7 +120,22 @@ class WebApplication:
         config = self.android_store.save(payload)
         self._check_android_config(config)
         cache_path = self.android_store.config_path.with_name("ticket_candidates.json")
-        return prepare_android_tickets(config, cache_path)
+        layout_path = self.android_store.config_path.with_name(LAYOUT_CACHE_NAME)
+        return prepare_android_tickets(config, cache_path, layout_path)
+
+    def android_layout_steps(self):
+        return {"steps": layout_steps()}
+
+    def capture_android_layout(self, payload):
+        if self.manager.snapshot()["running"]:
+            raise TaskBusy("抢票任务运行中，请先停止后再采集页面坐标")
+        step = (payload or {}).get("step")
+        if not step:
+            raise ConfigError("请指定要采集的页面步骤")
+        config = self.android_store.load()
+        self._check_android_config(config)
+        layout_path = self.android_store.config_path.with_name(LAYOUT_CACHE_NAME)
+        return capture_android_layout(config, step, layout_path)
 
     def start_android(self, payload):
         config = self.android_store.save(payload)
@@ -221,6 +237,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.check_android())
             elif method == "POST" and path == "/api/android/tickets/prepare":
                 self._json(200, app.prepare_android(self._read_json()))
+            elif method == "GET" and path == "/api/android/layout/steps":
+                self._json(200, app.android_layout_steps())
+            elif method == "POST" and path == "/api/android/layout/capture":
+                self._json(200, app.capture_android_layout(self._read_json()))
             elif method == "POST" and path == "/api/login":
                 self._json(200, app.start_login())
             elif method == "POST" and path == "/api/login/complete":
@@ -233,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.manager.stop())
             else:
                 self._error(404, "接口不存在")
-        except (ConfigError, TicketSelectionError) as exc:
+        except (ConfigError, TicketSelectionError, LayoutCacheError) as exc:
             self._error(400, str(exc))
         except TaskBusy as exc:
             self._error(409, str(exc))
