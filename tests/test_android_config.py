@@ -18,6 +18,7 @@ def valid_android_config():
         "date": "",
         "price": "",
         "price_index": 1,
+        "ticket_count": 2,
         "if_commit_order": False,
     }
 
@@ -42,15 +43,23 @@ class AndroidConfigValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "price_index"):
             validate_android_config(payload)
 
-    def test_requires_user_and_city(self):
+    def test_allows_empty_legacy_users_and_requires_city(self):
         payload = valid_android_config()
         payload["users"] = []
-        with self.assertRaisesRegex(ConfigError, "观演人"):
-            validate_android_config(payload)
-        payload = valid_android_config()
+        config = validate_android_config(payload)
+        self.assertEqual(config["users"], [])
+        self.assertEqual(config["ticket_count"], 2)
         payload["city"] = " "
         with self.assertRaisesRegex(ConfigError, "城市"):
             validate_android_config(payload)
+
+    def test_rejects_invalid_ticket_count(self):
+        for value in (0, 7, 1.5, True, "2"):
+            with self.subTest(value=value):
+                payload = valid_android_config()
+                payload["ticket_count"] = value
+                with self.assertRaisesRegex(ConfigError, "ticket_count"):
+                    validate_android_config(payload)
 
 
 class AndroidConfigStoreTests(unittest.TestCase):

@@ -17,8 +17,16 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 try:
     from .config import Config
+    from .adb_tap import PersistentAdbShell
+    from .fast_order import run_fast_order, validate_snapshot
+    from .layout_cache import LAYOUT_CACHE_NAME, load_layout, read_quantity
+    from .perf_probe import PerfRecorder, install as install_perf_probe, profile_enabled
 except ImportError:
     from config import Config
+    from adb_tap import PersistentAdbShell
+    from fast_order import run_fast_order, validate_snapshot
+    from layout_cache import LAYOUT_CACHE_NAME, load_layout, read_quantity
+    from perf_probe import PerfRecorder, install as install_perf_probe, profile_enabled
 
 
 class DamaiBot:
@@ -26,6 +34,10 @@ class DamaiBot:
         self.config = Config.load_config()
         self.driver = None
         self.wait = None
+        self.layout = None
+        self.adb_shell = None
+        self.profiler = PerfRecorder() if profile_enabled() else None
+        self._submit_attempted = False
         self._setup_driver()
 
     def _setup_driver(self):
@@ -65,6 +77,9 @@ class DamaiBot:
             "enableNotificationListener": False,  # 禁用通知监听
         })
 
+        if self.profiler is not None:
+            self.driver = install_perf_probe(self.driver, self.profiler)
+
         # 极短的显式等待，抢票场景下速度优先
         self.wait = WebDriverWait(self.driver, 2)  # 从5秒减少到2秒
 
@@ -97,35 +112,57 @@ class DamaiBot:
             else:
                 print(f"点击失败: {value}")
 
-    def ultra_batch_click(self, elements_info, timeout=2):
-        """选择观演人并确认复选框状态"""
-        selected_count = 0
-        for by, value in elements_info:
-            try:
-                name_element = WebDriverWait(self.driver, timeout).until(
-                    EC.presence_of_element_located((by, value))
-                )
-                viewer_name = name_element.get_attribute("text")
-                viewer_selector = f'//*[@resource-id="cn.damai:id/layout_main" and .//*[@resource-id="cn.damai:id/text_name" and @text="{viewer_name}"]]'
-                viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
-                checkbox = viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
-                if checkbox.get_attribute("checked") != "true":
-                    self.driver.execute_script("mobile: clickGesture", {"elementId": checkbox.id})
-                    viewer_row = self.driver.find_element(By.XPATH, viewer_selector)
-                    checkbox = viewer_row.find_element(By.ID, "cn.damai:id/checkbox")
-                if checkbox.get_attribute("checked") != "true":
-                    print(f"观演人未选中: {value}")
+    def select_viewers(self, ticket_count, timeout=2):
+        """选择前 N 位观演人，并复核实际勾选人数。"""
+        viewer_selector = (
+            '//*[@resource-id="cn.damai:id/layout_main" '
+            'and .//*[@resource-id="cn.damai:id/text_name"]]'
+        )
+
+        def checkbox_states(rows):
+            return [
+                row.find_element(By.ID, "cn.damai:id/checkbox").get_attribute("checked") == "true"
+                for row in rows
+            ]
+
+        try:
+            rows = WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_all_elements_located((By.XPATH, viewer_selector))
+            )
+            if len(rows) < ticket_count:
+                print(f"观演人不足：需要 {ticket_count} 位，当前仅找到 {len(rows)} 位")
+                return False
+
+            expected = [index < ticket_count for index in range(len(rows))]
+            initial_states = checkbox_states(rows)
+            for index, should_select in enumerate(expected):
+                if initial_states[index] == should_select:
+                    continue
+                current_rows = self.driver.find_elements(By.XPATH, viewer_selector)
+                if index >= len(current_rows):
+                    print("观演人列表在操作过程中发生变化")
                     return False
-                selected_count += 1
-                print(f"已选择观演人: {value}")
-            except TimeoutException:
-                print(f"超时未找到用户: {value}")
+                checkbox = current_rows[index].find_element(By.ID, "cn.damai:id/checkbox")
+                checked = checkbox.get_attribute("checked") == "true"
+                if checked != should_select:
+                    self.driver.execute_script("mobile: clickGesture", {"elementId": checkbox.id})
+
+            final_rows = self.driver.find_elements(By.XPATH, viewer_selector)
+            final_states = checkbox_states(final_rows)
+            if final_states != expected:
+                print(
+                    f"观演人勾选校验失败：需要前 {ticket_count} 位，"
+                    f"实际选中 {sum(final_states)} 位"
+                )
                 return False
-            except Exception as e:
-                print(f"选择用户失败 {value}: {e}")
-                return False
-        print(f"成功选择 {selected_count} 个用户")
-        return True
+            print(f"已选择前 {ticket_count} 位观演人，并确认勾选人数为 {ticket_count}")
+            return True
+        except TimeoutException:
+            print("等待观演人列表超时")
+            return False
+        except Exception as e:
+            print(f"选择观演人失败: {e}")
+            return False
 
     def smart_wait_and_click(self, by, value, backup_selectors=None, timeout=1.5):
         """智能等待和点击 - 支持备用选择器"""
@@ -209,28 +246,28 @@ class DamaiBot:
                 #     return False
 
             # 4. 数量选择
-            print("选择数量...")
-            if self.driver.find_elements(by=By.ID, value='layout_num'):
-                clicks_needed = len(self.config.users) - 1
-                if clicks_needed > 0:
-                    try:
-                        plus_button = self.driver.find_element(By.ID, 'img_jia')
-                        for i in range(clicks_needed):
-                            rect = plus_button.rect
-                            x = rect['x'] + rect['width'] // 2
-                            y = rect['y'] + rect['height'] // 2
-                            self.driver.execute_script("mobile: clickGesture", {
-                                "x": x,
-                                "y": y,
-                                "duration": 50
-                            })
-                            time.sleep(0.02)
-                    except Exception as e:
-                        print(f"快速点击加号失败: {e}")
-
-            # if self.driver.find_elements(by=By.ID, value='layout_num') and self.config.users is not None:
-            #     for i in range(len(self.config.users) - 1):
-            #         self.driver.find_element(by=By.ID, value='img_jia').click()
+            print(f"预设购票数量: {self.config.ticket_count} 张")
+            quantity_layouts = self.driver.find_elements(by=By.ID, value='layout_num')
+            clicks_needed = self.config.ticket_count - 1
+            if not quantity_layouts and clicks_needed > 0:
+                print("未找到数量控件，无法设置购票数量")
+                return False
+            if quantity_layouts and clicks_needed > 0:
+                try:
+                    plus_button = self.driver.find_element(By.ID, 'img_jia')
+                    for i in range(clicks_needed):
+                        rect = plus_button.rect
+                        x = rect['x'] + rect['width'] // 2
+                        y = rect['y'] + rect['height'] // 2
+                        self.driver.execute_script("mobile: clickGesture", {
+                            "x": x,
+                            "y": y,
+                            "duration": 50
+                        })
+                        time.sleep(0.02)
+                except Exception as e:
+                    print(f"设置购票数量失败: {e}")
+                    return False
 
             # 5. 确定购买
             print("确定购买...")
@@ -238,13 +275,10 @@ class DamaiBot:
                 # 备用按钮文本
                 self.ultra_fast_click(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*确定.*|.*购买.*")')
 
-            # 6. 批量选择用户
-            print("选择用户...")
-            user_clicks = [(AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{user}")') for user in
-                           self.config.users]
-            # self.batch_click(user_clicks, delay=0.05)  # 极短延迟
-            if not self.ultra_batch_click(user_clicks):
-                print("观演人选择失败，停止提交")
+            # 6. 按票数选择前 N 位观演人
+            print("选择观演人...")
+            if not self.select_viewers(self.config.ticket_count):
+                print("观演人选择或人数校验失败，停止提交")
                 return False
 
             # 7. 提交订单

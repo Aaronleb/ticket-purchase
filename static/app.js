@@ -78,7 +78,7 @@ function readAndroidConfig() {
     platform_version: $("#android-platform-version").value.trim(),
     city: $("#android-city").value.trim(),
     price_index: Number($("#android-price-index").value),
-    users: splitValues($("#android-users").value),
+    ticket_count: Number($("#android-ticket-count").value),
     if_commit_order: $("#android-if-commit").checked,
   };
 }
@@ -90,13 +90,13 @@ function fillAndroidConfig(config) {
   $("#android-platform-version").value = config.platform_version || "";
   $("#android-city").value = config.city || "";
   $("#android-price-index").value = config.price_index ?? 0;
-  $("#android-users").value = (config.users || []).join("，");
+  $("#android-ticket-count").value = config.ticket_count ?? 1;
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
 }
 
 function validateConfig(config, platform) {
-  if (!config.users.length) throw new Error("请至少填写一位观演人");
   if (platform === "pc") {
+    if (!config.users.length) throw new Error("请至少填写一位观演人");
     if (!config.target_url) throw new Error("请先填写演出详情页链接");
     return;
   }
@@ -106,6 +106,9 @@ function validateConfig(config, platform) {
   if (!config.city) throw new Error("请填写城市");
   if (!$("#android-price-index").value || !Number.isInteger(config.price_index) || config.price_index < 0 || config.price_index > 50) {
     throw new Error("票档序号必须是 0 到 50 之间的整数");
+  }
+  if (!$("#android-ticket-count").value || !Number.isInteger(config.ticket_count) || config.ticket_count < 1 || config.ticket_count > 6) {
+    throw new Error("购票数量必须是 1 到 6 之间的整数");
   }
 }
 

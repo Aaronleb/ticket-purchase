@@ -19,6 +19,7 @@ DEFAULT_ANDROID_CONFIG = {
     "date": "",
     "price": "",
     "price_index": 0,
+    "ticket_count": 1,
     "if_commit_order": False,
 }
 
@@ -66,13 +67,14 @@ def validate_android_config(payload) -> dict:
         name = user.strip()
         if name not in normalized_users:
             normalized_users.append(name)
-    if not normalized_users:
-        raise ConfigError("请至少填写一位观演人")
     config["users"] = normalized_users
 
     price_index = config["price_index"]
     if isinstance(price_index, bool) or not isinstance(price_index, int) or not 0 <= price_index <= 50:
         raise ConfigError("price_index 必须是 0 到 50 之间的整数")
+    ticket_count = config["ticket_count"]
+    if isinstance(ticket_count, bool) or not isinstance(ticket_count, int) or not 1 <= ticket_count <= 6:
+        raise ConfigError("ticket_count 必须是 1 到 6 之间的整数")
     if not isinstance(config["if_commit_order"], bool):
         raise ConfigError("if_commit_order 必须是布尔值")
     return config

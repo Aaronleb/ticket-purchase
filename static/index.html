@@ -98,11 +98,9 @@
           <label class="field"><span>Android 版本 <b>必填</b></span><input id="android-platform-version" type="text" placeholder="检测设备后自动填写" required></label>
           <label class="field"><span>城市 <b>必填</b></span><input id="android-city" type="text" placeholder="例如：杭州" required></label>
           <label class="field"><span>票档序号 <b>从 0 开始</b></span><input id="android-price-index" type="number" min="0" max="50" step="1" value="0" required></label>
+          <label class="field"><span>购票数量 <b>1–6 张</b></span><input id="android-ticket-count" type="number" min="1" max="6" step="1" value="1" required></label>
         </div>
-        <label class="field field-full android-users-field">
-          <span>观演人 <b>必填</b></span><input id="android-users" type="text" placeholder="多位观演人用逗号分隔" required>
-        </label>
-        <p id="android-device-hint" class="field-hint">票档序号对应详情页可点击票档的位置。启动前请先在手机打开目标演出详情页。</p>
+        <p id="android-device-hint" class="field-hint">票档序号对应详情页可点击票档的位置。确认购买时自动选择前 N 位观演人，并校验实际勾选人数。</p>
 
         <div class="preference-row android-preferences">
           <label class="toggle-field danger-toggle"><input id="android-if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>关闭时停在订单确认页，启动前会再次确认</small></span></label>

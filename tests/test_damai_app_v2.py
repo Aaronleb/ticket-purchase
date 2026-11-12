@@ -18,7 +18,7 @@ BASE_CONFIG = {
 }
 
 
-def test_load_config_uses_legacy_device_defaults(mocker):
+def test_load_config_uses_legacy_defaults(mocker):
     config_file = mock_open(read_data=json.dumps(BASE_CONFIG))
     mocker.patch("builtins.open", config_file)
 
@@ -26,7 +26,15 @@ def test_load_config_uses_legacy_device_defaults(mocker):
 
     assert config.device_name == "emulator-5554"
     assert config.platform_version == "16"
+    assert config.ticket_count == 1
     config_file.assert_called_once_with("config.jsonc", "r", encoding="utf-8")
+
+
+def test_load_config_reads_ticket_count(mocker):
+    payload = {**BASE_CONFIG, "ticket_count": 4}
+    mocker.patch("builtins.open", mock_open(read_data=json.dumps(payload)))
+
+    assert Config.load_config().ticket_count == 4
 
 
 def test_capabilities_use_configured_device(mocker):
@@ -51,6 +59,7 @@ def make_bot(mocker, if_commit_order):
         city="深圳",
         users=["观演人"],
         price_index=5,
+        ticket_count=1,
         if_commit_order=if_commit_order,
     )
     bot.driver = Mock()
@@ -58,7 +67,7 @@ def make_bot(mocker, if_commit_order):
     bot.wait = Mock()
     bot.smart_wait_and_click = Mock(return_value=True)
     bot.ultra_fast_click = Mock(return_value=True)
-    bot.ultra_batch_click = Mock()
+    bot.select_viewers = Mock(return_value=True)
     mocker.patch("damai_appium.damai_app_v2.time.sleep")
     return bot
 
@@ -66,7 +75,8 @@ def make_bot(mocker, if_commit_order):
 def test_existing_price_page_skips_city_and_booking(mocker):
     bot = make_bot(mocker, if_commit_order=False)
 
-    def find_elements(by, value):
+    def find_elements(by=None, value=None, **kwargs):
+        value = value or kwargs.get("value")
         if value == "cn.damai:id/project_detail_perform_price_flowlayout":
             return [Mock()]
         return []
@@ -77,7 +87,7 @@ def test_existing_price_page_skips_city_and_booking(mocker):
 
     bot.smart_wait_and_click.assert_not_called()
     bot.ultra_fast_click.assert_called_once()
-    bot.ultra_batch_click.assert_called_once()
+    bot.select_viewers.assert_called_once_with(1)
 
 
 def test_skip_submit_stops_after_selecting_users(mocker):
@@ -85,7 +95,7 @@ def test_skip_submit_stops_after_selecting_users(mocker):
 
     assert bot.run_ticket_grabbing() is True
 
-    bot.ultra_batch_click.assert_called_once()
+    bot.select_viewers.assert_called_once_with(1)
     assert bot.smart_wait_and_click.call_count == 2
 
 
@@ -99,31 +109,103 @@ def test_commit_order_clicks_submit(mocker):
     assert submit_call.args[1] == 'new UiSelector().text("立即提交")'
 
 
-def test_viewer_checkbox_is_clicked_and_verified(mocker):
+def test_ticket_count_clicks_plus_n_minus_one(mocker):
     bot = make_bot(mocker, if_commit_order=False)
-    name = Mock()
-    row = Mock()
-    checkbox = Mock()
-    checkbox.id = "checkbox-id"
-    checkbox.get_attribute.side_effect = ["false", "true"]
-    name.get_attribute.return_value = "观演人"
-    bot.driver.find_element.return_value = row
-    row.find_element.return_value = checkbox
+    bot.config.ticket_count = 3
+    plus_button = Mock()
+    plus_button.rect = {"x": 10, "y": 20, "width": 30, "height": 40}
+
+    def find_elements(by=None, value=None, **kwargs):
+        value = value or kwargs.get("value")
+        if value in {"cn.damai:id/project_detail_perform_price_flowlayout", "layout_num"}:
+            return [Mock()]
+        return []
+
+    def find_element(by, value):
+        return plus_button if value == "img_jia" else Mock()
+
+    bot.driver.find_elements.side_effect = find_elements
+    bot.driver.find_element.side_effect = find_element
+
+    assert bot.run_ticket_grabbing() is True
+
+    plus_clicks = [
+        call for call in bot.driver.execute_script.call_args_list
+        if "x" in call.args[1]
+    ]
+    assert len(plus_clicks) == 2
+    bot.select_viewers.assert_called_once_with(3)
+
+
+def test_missing_quantity_control_stops_before_buying(mocker):
+    bot = make_bot(mocker, if_commit_order=True)
+    bot.config.ticket_count = 2
+
+    assert bot.run_ticket_grabbing() is False
+
+    bot.ultra_fast_click.assert_not_called()
+    bot.select_viewers.assert_not_called()
+
+
+def make_viewer_rows(states):
+    rows = []
+    for index in range(len(states)):
+        row = Mock()
+        checkbox = Mock()
+        checkbox.id = f"checkbox-{index}"
+        checkbox.get_attribute.side_effect = (
+            lambda name, index=index: "true" if states[index] else "false"
+        )
+        row.find_element.return_value = checkbox
+        rows.append(row)
+    return rows
+
+
+def make_viewer_bot(mocker, states):
+    bot = DamaiBot.__new__(DamaiBot)
+    bot.driver = Mock()
+    rows = make_viewer_rows(states)
+    bot.driver.find_elements.return_value = rows
     wait = Mock()
-    wait.until.return_value = name
+    wait.until.return_value = rows
     mocker.patch("damai_appium.damai_app_v2.WebDriverWait", return_value=wait)
 
-    assert DamaiBot.ultra_batch_click(bot, [("uiautomator", "观演人")]) is True
+    def toggle_checkbox(script, payload):
+        index = int(payload["elementId"].rsplit("-", 1)[1])
+        states[index] = not states[index]
 
-    bot.driver.execute_script.assert_called_once_with(
-        "mobile: clickGesture", {"elementId": "checkbox-id"}
-    )
-    assert bot.driver.find_element.call_count == 2
+    bot.driver.execute_script.side_effect = toggle_checkbox
+    return bot
+
+
+def test_select_viewers_selects_first_n_and_unselects_extras(mocker):
+    states = [True, False, True]
+    bot = make_viewer_bot(mocker, states)
+
+    assert bot.select_viewers(2) is True
+
+    assert states == [True, True, False]
+    clicked = [call.args[1]["elementId"] for call in bot.driver.execute_script.call_args_list]
+    assert clicked == ["checkbox-1", "checkbox-2"]
+
+
+def test_select_viewers_rejects_insufficient_viewers(mocker):
+    bot = make_viewer_bot(mocker, [True])
+
+    assert bot.select_viewers(2) is False
+    bot.driver.execute_script.assert_not_called()
+
+
+def test_select_viewers_rejects_checkbox_verification_failure(mocker):
+    bot = make_viewer_bot(mocker, [False])
+    bot.driver.execute_script.side_effect = None
+
+    assert bot.select_viewers(1) is False
 
 
 def test_unselected_viewer_stops_before_submit(mocker):
     bot = make_bot(mocker, if_commit_order=True)
-    bot.ultra_batch_click.return_value = False
+    bot.select_viewers.return_value = False
 
     assert bot.run_ticket_grabbing() is False
 
