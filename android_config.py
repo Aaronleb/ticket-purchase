@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from config_store import ConfigError
+from damai_appium.sale_clock import SaleTimeError, normalize_sale_time
 
 
 DEFAULT_ANDROID_CONFIG = {
@@ -20,6 +21,7 @@ DEFAULT_ANDROID_CONFIG = {
     "price": "",
     "price_index": 0,
     "ticket_count": 1,
+    "sell_start_time": "",
     "if_commit_order": False,
 }
 
@@ -53,8 +55,7 @@ def validate_android_config(payload) -> dict:
     config["server_url"] = server_url
     config["device_name"] = _required_string(config["device_name"], "设备名")
     config["platform_version"] = _required_string(config["platform_version"], "Android 版本")
-    config["city"] = _required_string(config["city"], "城市")
-    for field in ("keyword", "date", "price"):
+    for field in ("keyword", "city", "date", "price"):
         config[field] = _optional_string(config[field], field)
 
     users = config["users"]
@@ -75,6 +76,10 @@ def validate_android_config(payload) -> dict:
     ticket_count = config["ticket_count"]
     if isinstance(ticket_count, bool) or not isinstance(ticket_count, int) or not 1 <= ticket_count <= 6:
         raise ConfigError("ticket_count 必须是 1 到 6 之间的整数")
+    try:
+        config["sell_start_time"] = normalize_sale_time(config["sell_start_time"])
+    except SaleTimeError as exc:
+        raise ConfigError(str(exc)) from exc
     if not isinstance(config["if_commit_order"], bool):
         raise ConfigError("if_commit_order 必须是布尔值")
     return config

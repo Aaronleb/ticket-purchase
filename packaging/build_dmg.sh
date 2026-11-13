@@ -89,6 +89,7 @@ mkdir -p "$RUNTIME/ticket-purchase/damai_appium"
 cp "$PROJECT_ROOT/damai_appium/__init__.py" "$RUNTIME/ticket-purchase/damai_appium/"
 cp "$PROJECT_ROOT/damai_appium/config.py" "$RUNTIME/ticket-purchase/damai_appium/"
 cp "$PROJECT_ROOT/damai_appium/damai_app_v2.py" "$RUNTIME/ticket-purchase/damai_appium/"
+cp "$PROJECT_ROOT/damai_appium/sale_clock.py" "$RUNTIME/ticket-purchase/damai_appium/"
 cp "$RUNTIME/node/LICENSE" "$RUNTIME/NODE-LICENSE.txt"
 cp "$ROOT/packaging/THIRD_PARTY_NOTICES.md" "$RUNTIME/THIRD_PARTY_NOTICES.md"
 

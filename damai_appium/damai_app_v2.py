@@ -1,32 +1,49 @@
 # -*- coding: UTF-8 -*-
-"""
-__Author__ = "BlueCestbon"
-__Version__ = "2.0.0"
-__Description__ = "大麦app抢票自动化 - 优化版"
-__Created__ = 2025/09/13 19:27
-"""
+"""大麦 App 原生预约快路。"""
+from __future__ import annotations
 
+import re
 import time
+
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
 from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 try:
     from .config import Config
-    from .adb_tap import PersistentAdbShell
-    from .fast_order import run_fast_order, validate_snapshot
-    from .layout_cache import LAYOUT_CACHE_NAME, load_layout, read_quantity
-    from .perf_probe import PerfRecorder, install as install_perf_probe, profile_enabled
+    from .sale_clock import SaleTimeError, wait_for_sale_time
 except ImportError:
     from config import Config
-    from adb_tap import PersistentAdbShell
-    from fast_order import run_fast_order, validate_snapshot
-    from layout_cache import LAYOUT_CACHE_NAME, load_layout, read_quantity
-    from perf_probe import PerfRecorder, install as install_perf_probe, profile_enabled
+    from sale_clock import SaleTimeError, wait_for_sale_time
+
+
+BUY_NOW_SELECTOR = (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().text("立即购买")')
+SUBMIT_SELECTORS = (
+    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().text("立即提交")'),
+    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().text("提交订单")'),
+)
+VIEWER_CHECKBOXES = (
+    '//*[@resource-id="cn.damai:id/layout_main"]'
+    '//*[@resource-id="cn.damai:id/checkbox"]'
+)
+
+
+class ConfirmationError(RuntimeError):
+    """订单确认页不符合提交条件。"""
+
+
+def parse_amount(text):
+    """从确认页金额控件读取唯一、大于零的金额。"""
+    if not isinstance(text, str):
+        return None
+    matches = re.findall(r"\d+(?:\.\d+)?", text.replace(",", ""))
+    if len(matches) != 1:
+        return None
+    amount = float(matches[0])
+    return amount if amount > 0 else None
 
 
 class DamaiBot:
@@ -34,302 +51,150 @@ class DamaiBot:
         self.config = Config.load_config()
         self.driver = None
         self.wait = None
-        self.layout = None
-        self.adb_shell = None
-        self.profiler = PerfRecorder() if profile_enabled() else None
+        self._purchase_attempted = False
         self._submit_attempted = False
         self._setup_driver()
 
     def _setup_driver(self):
-        """初始化驱动配置"""
         capabilities = {
-            "platformName": "Android",  # 操作系统
-            "platformVersion": self.config.platform_version,  # 系统版本
-            "deviceName": self.config.device_name,  # 设备名称
-            "appPackage": "cn.damai",  # app 包名
-            "appActivity": ".launcher.splash.SplashMainActivity",  # app 启动 Activity
-            "unicodeKeyboard": True,  # 支持 Unicode 输入
-            "resetKeyboard": True,  # 隐藏键盘
-            "noReset": True,  # 不重置 app
-            "newCommandTimeout": 6000,  # 超时时间
-            "automationName": "UiAutomator2",  # 使用 uiautomator2
-            "skipServerInstallation": False,  # 跳过服务器安装
-            "ignoreHiddenApiPolicyError": True,  # 忽略隐藏 API 策略错误
-            "disableWindowAnimation": True,  # 禁用窗口动画
-            # 优化性能配置
-            "mjpegServerFramerate": 1,  # 降低截图帧率
+            "platformName": "Android",
+            "platformVersion": self.config.platform_version,
+            "deviceName": self.config.device_name,
+            "appPackage": "cn.damai",
+            "appActivity": ".launcher.splash.SplashMainActivity",
+            "unicodeKeyboard": True,
+            "resetKeyboard": True,
+            "noReset": True,
+            "newCommandTimeout": 86400,
+            "automationName": "UiAutomator2",
+            "skipServerInstallation": False,
+            "ignoreHiddenApiPolicyError": True,
+            "disableWindowAnimation": True,
+            "mjpegServerFramerate": 1,
             "shouldTerminateApp": False,
             "adbExecTimeout": 20000,
         }
-
-        device_app_info = AppiumOptions()
-        device_app_info.load_capabilities(capabilities)
-        self.driver = webdriver.Remote(self.config.server_url, options=device_app_info)
-
-        # 更激进的性能优化设置
+        options = AppiumOptions().load_capabilities(capabilities)
+        self.driver = webdriver.Remote(self.config.server_url, options=options)
         self.driver.update_settings({
-            "waitForIdleTimeout": 0,  # 空闲时间，0 表示不等待，让 UIAutomator2 不等页面“空闲”再返回
-            "actionAcknowledgmentTimeout": 0,  # 禁止等待动作确认
-            "keyInjectionDelay": 0,  # 禁止输入延迟
-            "waitForSelectorTimeout": 300,  # 从500减少到300ms
-            "ignoreUnimportantViews": False,  # 保持false避免元素丢失
+            "waitForIdleTimeout": 0,
+            "actionAcknowledgmentTimeout": 0,
+            "keyInjectionDelay": 0,
+            "waitForSelectorTimeout": 300,
+            "ignoreUnimportantViews": False,
             "allowInvisibleElements": True,
-            "enableNotificationListener": False,  # 禁用通知监听
+            "enableNotificationListener": False,
+        })
+        self.wait = WebDriverWait(self.driver, 2, poll_frequency=0.05)
+
+    @staticmethod
+    def _click_element(driver, element):
+        rect = element.rect
+        driver.execute_script("mobile: clickGesture", {
+            "x": rect["x"] + rect["width"] // 2,
+            "y": rect["y"] + rect["height"] // 2,
+            "duration": 20,
         })
 
-        if self.profiler is not None:
-            self.driver = install_perf_probe(self.driver, self.profiler)
+    def _find_submit(self):
+        for by, value in SUBMIT_SELECTORS:
+            elements = self.driver.find_elements(by, value)
+            if elements:
+                return elements[0]
+        return None
 
-        # 极短的显式等待，抢票场景下速度优先
-        self.wait = WebDriverWait(self.driver, 2)  # 从5秒减少到2秒
-
-    def ultra_fast_click(self, by, value, timeout=1.5):
-        """超快速点击 - 适合抢票场景"""
-        try:
-            # 直接查找并点击，不等待可点击状态
-            el = WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_element_located((by, value))
-            )
-            # 使用坐标点击更快
-            rect = el.rect
-            x = rect['x'] + rect['width'] // 2
-            y = rect['y'] + rect['height'] // 2
-            self.driver.execute_script("mobile: clickGesture", {
-                "x": x,
-                "y": y,
-                "duration": 50  # 极短点击时间
-            })
-            return True
-        except TimeoutException:
+    def _locate_confirmation(self, _driver):
+        """一次轮询确认页的三个必要区域，不修改任何预约选择。"""
+        prices = self.driver.find_elements(By.ID, "cn.damai:id/tv_price")
+        checkboxes = self.driver.find_elements(By.XPATH, VIEWER_CHECKBOXES)
+        if not prices or not checkboxes:
             return False
+        submit = self._find_submit()
+        if submit is None:
+            return False
+        return {"price": prices[0], "checkboxes": checkboxes, "submit": submit}
 
-    def batch_click(self, elements_info, delay=0.1):
-        """批量点击操作"""
-        for by, value in elements_info:
-            if self.ultra_fast_click(by, value):
-                if delay > 0:
-                    time.sleep(delay)
-            else:
-                print(f"点击失败: {value}")
-
-    def select_viewers(self, ticket_count, timeout=2):
-        """选择前 N 位观演人，并复核实际勾选人数。"""
-        viewer_selector = (
-            '//*[@resource-id="cn.damai:id/layout_main" '
-            'and .//*[@resource-id="cn.damai:id/text_name"]]'
+    @staticmethod
+    def _validate_confirmation(page, ticket_count):
+        price_element = page["price"]
+        price_text = price_element.get_attribute("text") or price_element.text
+        amount = parse_amount(price_text)
+        if amount is None:
+            raise ConfirmationError(f"确认页金额无效：{price_text!r}")
+        selected = sum(
+            checkbox.get_attribute("checked") == "true"
+            for checkbox in page["checkboxes"]
         )
-
-        def checkbox_states(rows):
-            return [
-                row.find_element(By.ID, "cn.damai:id/checkbox").get_attribute("checked") == "true"
-                for row in rows
-            ]
-
-        try:
-            rows = WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_all_elements_located((By.XPATH, viewer_selector))
+        if selected != ticket_count:
+            raise ConfirmationError(
+                f"预约观演人数不符：需要 {ticket_count} 位，实际已选 {selected} 位"
             )
-            if len(rows) < ticket_count:
-                print(f"观演人不足：需要 {ticket_count} 位，当前仅找到 {len(rows)} 位")
-                return False
+        return amount, selected
 
-            expected = [index < ticket_count for index in range(len(rows))]
-            initial_states = checkbox_states(rows)
-            for index, should_select in enumerate(expected):
-                if initial_states[index] == should_select:
-                    continue
-                current_rows = self.driver.find_elements(By.XPATH, viewer_selector)
-                if index >= len(current_rows):
-                    print("观演人列表在操作过程中发生变化")
-                    return False
-                checkbox = current_rows[index].find_element(By.ID, "cn.damai:id/checkbox")
-                checked = checkbox.get_attribute("checked") == "true"
-                if checked != should_select:
-                    self.driver.execute_script("mobile: clickGesture", {"elementId": checkbox.id})
-
-            final_rows = self.driver.find_elements(By.XPATH, viewer_selector)
-            final_states = checkbox_states(final_rows)
-            if final_states != expected:
-                print(
-                    f"观演人勾选校验失败：需要前 {ticket_count} 位，"
-                    f"实际选中 {sum(final_states)} 位"
-                )
-                return False
-            print(f"已选择前 {ticket_count} 位观演人，并确认勾选人数为 {ticket_count}")
-            return True
-        except TimeoutException:
-            print("等待观演人列表超时")
-            return False
-        except Exception as e:
-            print(f"选择观演人失败: {e}")
-            return False
-
-    def smart_wait_and_click(self, by, value, backup_selectors=None, timeout=1.5):
-        """智能等待和点击 - 支持备用选择器"""
-        selectors = [(by, value)]
-        if backup_selectors:
-            selectors.extend(backup_selectors)
-
-        for selector_by, selector_value in selectors:
-            try:
-                el = WebDriverWait(self.driver, timeout).until(
-                    EC.presence_of_element_located((selector_by, selector_value))
-                )
-                rect = el.rect
-                x = rect['x'] + rect['width'] // 2
-                y = rect['y'] + rect['height'] // 2
-                self.driver.execute_script("mobile: clickGesture", {"x": x, "y": y, "duration": 50})
-                return True
-            except TimeoutException:
-                continue
-        return False
+    def _wait_for_sale(self):
+        return wait_for_sale_time(self.config.sell_start_time)
 
     def run_ticket_grabbing(self):
-        """执行抢票主流程"""
+        """执行一次预约快路；任何结果不明确都停止，不自动重试。"""
+        started = None
         try:
-            print("开始抢票流程...")
-            start_time = time.time()
-
-            if self.driver.find_elements(By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout'):
-                print("已在票档页面，跳过城市和预约步骤...")
-            else:
-                # 1. 城市选择 - 准备多个备选方案
-                print("选择城市...")
-                city_selectors = [
-                    (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{self.config.city}")'),
-                    (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().textContains("{self.config.city}")'),
-                    (By.XPATH, f'//*[@text="{self.config.city}"]')
-                ]
-                if not self.smart_wait_and_click(*city_selectors[0], city_selectors[1:]):
-                    print("城市选择失败")
-                    return False
-
-                # 2. 点击预约按钮 - 多种可能的按钮文本
-                print("点击预约按钮...")
-                book_selectors = [
-                    (By.ID, "cn.damai:id/trade_project_detail_purchase_status_bar_container_fl"),
-                    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*预约.*|.*购买.*|.*立即.*")'),
-                    (By.XPATH, '//*[contains(@text,"预约") or contains(@text,"购买")]')
-                ]
-                if not self.smart_wait_and_click(*book_selectors[0], book_selectors[1:]):
-                    print("预约按钮点击失败")
-                    return False
-
-            # 3. 票价选择 - 优化查找逻辑
-            print("选择票价...")
-            try:
-                # 直接尝试点击，不等待容器，实际每次都失败，只能等待
-                price_container = self.driver.find_element(By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout')
-                # price_container = self.wait.until(  # 等待找到容器
-                #     EC.presence_of_element_located((By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout')))
-                # 在容器内找 index=1 且 clickable="true" 的 FrameLayout【因为799元的票价是排在第二的，但是page里text是空的被隐藏了】
-                target_price = price_container.find_element(
-                    AppiumBy.ANDROID_UIAUTOMATOR,
-                    f'new UiSelector().className("android.widget.FrameLayout").index({self.config.price_index}).clickable(true)'
-                )
-                self.driver.execute_script('mobile: clickGesture', {'elementId': target_price.id})
-            except Exception as e:
-                print(f"票价选择失败，启动备用方案: {e}")
-                # 备用方案
-                # 先找到大容器
-                price_container = self.wait.until(
-                    EC.presence_of_element_located((By.ID, 'cn.damai:id/project_detail_perform_price_flowlayout')))
-                # 在容器内找 index=1 且 clickable="true" 的 FrameLayout【因为799元的票价是排在第二的，但是page里text是空的被隐藏了】
-                target_price = price_container.find_element(
-                    AppiumBy.ANDROID_UIAUTOMATOR,
-                    f'new UiSelector().className("android.widget.FrameLayout").index({self.config.price_index}).clickable(true)'
-                )
-                self.driver.execute_script('mobile: clickGesture', {'elementId': target_price.id})
-
-                # if not self.ultra_fast_click(AppiumBy.ANDROID_UIAUTOMATOR,
-                #                              'new UiSelector().textMatches(".*799.*|.*\\d+元.*")'):
-                #     return False
-
-            # 4. 数量选择
-            print(f"预设购票数量: {self.config.ticket_count} 张")
-            quantity_layouts = self.driver.find_elements(by=By.ID, value='layout_num')
-            clicks_needed = self.config.ticket_count - 1
-            if not quantity_layouts and clicks_needed > 0:
-                print("未找到数量控件，无法设置购票数量")
+            if self._purchase_attempted:
+                print("本次会话已尝试购买，停止重复操作")
                 return False
-            if quantity_layouts and clicks_needed > 0:
-                try:
-                    plus_button = self.driver.find_element(By.ID, 'img_jia')
-                    for i in range(clicks_needed):
-                        rect = plus_button.rect
-                        x = rect['x'] + rect['width'] // 2
-                        y = rect['y'] + rect['height'] // 2
-                        self.driver.execute_script("mobile: clickGesture", {
-                            "x": x,
-                            "y": y,
-                            "duration": 50
-                        })
-                        time.sleep(0.02)
-                except Exception as e:
-                    print(f"设置购票数量失败: {e}")
-                    return False
+            print(f"等待程序定时开抢：{self.config.sell_start_time}")
+            release = self._wait_for_sale()
+            print(
+                f"定时放行：{release.released_at.isoformat()}；"
+                f"调度偏差：{release.delay_ms:.3f} 毫秒"
+            )
+            started = time.perf_counter()
+            self._purchase_attempted = True
+            print("预约快路：点击立即购买...")
+            buy_buttons = self.wait.until(
+                lambda _driver: self.driver.find_elements(*BUY_NOW_SELECTOR) or False
+            )
+            self._click_element(self.driver, buy_buttons[0])
 
-            # 5. 确定购买
-            print("确定购买...")
-            if not self.ultra_fast_click(By.ID, "btn_buy_view"):
-                # 备用按钮文本
-                self.ultra_fast_click(AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*确定.*|.*购买.*")')
+            print("等待订单确认页并核对预约结果...")
+            page = self.wait.until(self._locate_confirmation)
+            amount, selected = self._validate_confirmation(
+                page, self.config.ticket_count
+            )
+            print(f"确认页金额：{amount:g} 元；已选观演人：{selected} 位")
 
-            # 6. 按票数选择前 N 位观演人
-            print("选择观演人...")
-            if not self.select_viewers(self.config.ticket_count):
-                print("观演人选择或人数校验失败，停止提交")
+            if not self.config.if_commit_order:
+                print("预约信息核对通过，自动提交已关闭")
+                return True
+            if self._submit_attempted:
+                print("本次会话已尝试提交，禁止重复提交")
                 return False
 
-            # 7. 提交订单
-            if self.config.if_commit_order:
-                print("提交订单...")
-                submit_selectors = [
-                    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().text("立即提交")'),
-                    (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().textMatches(".*提交.*|.*确认.*")'),
-                    (By.XPATH, '//*[contains(@text,"提交")]')
-                ]
-                if not self.smart_wait_and_click(*submit_selectors[0], submit_selectors[1:]):
-                    print("提交订单按钮点击失败")
-                    return False
-            else:
-                print("观演人选择完成，未提交订单")
-
-            end_time = time.time()
-            print(f"流程结束，请在大麦 App 确认订单状态，耗时: {end_time - start_time:.2f}秒")
+            self._submit_attempted = True
+            print("提交订单（仅一次）...")
+            self._click_element(self.driver, page["submit"])
+            print(f"提交指令已发出，请在大麦 App 确认订单；耗时：{time.perf_counter() - started:.3f} 秒")
             return True
-
-        except Exception as e:
-            print(f"抢票过程发生错误: {e}")
+        except TimeoutException:
+            print("预约快路超时：未找到立即购买或完整订单确认页，已停止")
+            return False
+        except ConfirmationError as exc:
+            print(f"{exc}，禁止提交")
+            return False
+        except SaleTimeError as exc:
+            print(f"定时抢购未执行：{exc}")
+            return False
+        except Exception as exc:
+            print(f"预约快路中止：{exc}；不会自动重试或重复提交")
             return False
         finally:
-            time.sleep(1)  # 给最后的操作一点时间
-            self.driver.quit()
+            if self.driver is not None:
+                self.driver.quit()
 
-    def run_with_retry(self, max_retries=3):
-        """带重试机制的抢票"""
-        for attempt in range(max_retries):
-            print(f"第 {attempt + 1} 次尝试...")
-            if self.run_ticket_grabbing():
-                print("流程结束，请在大麦 App 确认订单状态")
-                return True
-            else:
-                print(f"第 {attempt + 1} 次尝试失败")
-                if attempt < max_retries - 1:
-                    print("2秒后重试...")
-                    time.sleep(2)
-                    # 重新初始化驱动
-                    try:
-                        self.driver.quit()
-                    except:
-                        pass
-                    self._setup_driver()
-
-        print("所有尝试均失败")
-        return False
+    def run_with_retry(self, max_retries=1):
+        """兼容旧入口；预约快路始终只执行一次。"""
+        return self.run_ticket_grabbing()
 
 
-# 使用示例
 if __name__ == "__main__":
     bot = DamaiBot()
-    bot.run_with_retry(max_retries=3)
+    bot.run_with_retry()

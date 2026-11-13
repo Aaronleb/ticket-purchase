@@ -96,11 +96,10 @@
         <div class="field-grid">
           <label class="field"><span>设备名 <b>必填</b></span><input id="android-device-name" type="text" list="android-device-list" placeholder="连接手机后自动检测" autocomplete="off" required><datalist id="android-device-list"></datalist></label>
           <label class="field"><span>Android 版本 <b>必填</b></span><input id="android-platform-version" type="text" placeholder="检测设备后自动填写" required></label>
-          <label class="field"><span>城市 <b>必填</b></span><input id="android-city" type="text" placeholder="例如：杭州" required></label>
-          <label class="field"><span>票档序号 <b>从 0 开始</b></span><input id="android-price-index" type="number" min="0" max="50" step="1" value="0" required></label>
           <label class="field"><span>购票数量 <b>1–6 张</b></span><input id="android-ticket-count" type="number" min="1" max="6" step="1" value="1" required></label>
+          <label class="field"><span>抢购时间 <b>北京时间</b></span><input id="android-sell-start-time" type="datetime-local" step="1" required></label>
         </div>
-        <p id="android-device-hint" class="field-hint">票档序号对应详情页可点击票档的位置。确认购买时自动选择前 N 位观演人，并校验实际勾选人数。</p>
+        <p id="android-device-hint" class="field-hint">仅支持已预约演出：请先在大麦 App 选好场次、票档和观演人。启动后程序自动等到抢购时间，不需要再次点击。</p>
 
         <div class="preference-row android-preferences">
           <label class="toggle-field danger-toggle"><input id="android-if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>关闭时停在订单确认页，启动前会再次确认</small></span></label>
@@ -130,8 +129,8 @@
             </div>
             <ol class="device-prep">
               <li id="android-appium-prep">启动 Appium 服务并连接设备</li>
-              <li>在大麦 App 登录并打开目标详情页</li>
-              <li>保持手机亮屏，再启动安卓抢票</li>
+              <li>在大麦 App 登录，完成场次、票档和观演人预约</li>
+              <li>停在目标详情页，保持 Mac 与手机唤醒并启用系统自动校时</li>
             </ol>
             <button id="android-refresh-devices" class="button button-outline button-block" type="button">重新检测设备</button>
           </div>

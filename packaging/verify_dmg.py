@@ -209,6 +209,7 @@ def main() -> int:
             "users": ["测试观演人"],
             "city": "测试城市",
             "price_index": 0,
+            "sell_start_time": "2099-01-01T20:00:00+08:00",
             "if_commit_order": False,
         }
         http_status, saved = request(f"{url}/api/android/config", "PUT", config)

@@ -76,9 +76,8 @@ function readAndroidConfig() {
     server_url: $("#android-server-url").value.trim(),
     device_name: $("#android-device-name").value.trim(),
     platform_version: $("#android-platform-version").value.trim(),
-    city: $("#android-city").value.trim(),
-    price_index: Number($("#android-price-index").value),
     ticket_count: Number($("#android-ticket-count").value),
+    sell_start_time: $("#android-sell-start-time").value,
     if_commit_order: $("#android-if-commit").checked,
   };
 }
@@ -88,9 +87,8 @@ function fillAndroidConfig(config) {
   $("#android-server-url").value = config.server_url || "http://127.0.0.1:4723";
   $("#android-device-name").value = config.device_name || "";
   $("#android-platform-version").value = config.platform_version || "";
-  $("#android-city").value = config.city || "";
-  $("#android-price-index").value = config.price_index ?? 0;
   $("#android-ticket-count").value = config.ticket_count ?? 1;
+  $("#android-sell-start-time").value = config.sell_start_time ? config.sell_start_time.slice(0, 19) : "";
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
 }
 
@@ -103,13 +101,13 @@ function validateConfig(config, platform) {
   if (!config.server_url) throw new Error("请填写 Appium 服务地址");
   if (!config.device_name) throw new Error("请填写 adb devices 显示的设备名");
   if (!config.platform_version) throw new Error("请填写 Android 版本");
-  if (!config.city) throw new Error("请填写城市");
-  if (!$("#android-price-index").value || !Number.isInteger(config.price_index) || config.price_index < 0 || config.price_index > 50) {
-    throw new Error("票档序号必须是 0 到 50 之间的整数");
-  }
   if (!$("#android-ticket-count").value || !Number.isInteger(config.ticket_count) || config.ticket_count < 1 || config.ticket_count > 6) {
     throw new Error("购票数量必须是 1 到 6 之间的整数");
   }
+  if (!config.sell_start_time) throw new Error("请填写抢购时间");
+  const saleTimestamp = new Date(config.sell_start_time).getTime();
+  if (Number.isNaN(saleTimestamp)) throw new Error("抢购时间格式无效");
+  if (saleTimestamp <= Date.now()) throw new Error("抢购时间已过，请选择未来时间");
 }
 
 function setPlatform(platform, force = false) {
@@ -291,7 +289,7 @@ $("#android-config-form").addEventListener("submit", async (event) => {
     const saved = await api("/api/android/config", { method: "PUT", body: JSON.stringify(config) });
     fillAndroidConfig(saved);
     $("#android-save-state").textContent = "安卓配置已保存";
-    toast("安卓设备与观演人配置已保存");
+    toast("安卓设备与预约数量已保存");
   } catch (error) {
     toast(error.message, true);
   }
