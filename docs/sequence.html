@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大麦抢票 · 两条链路时序</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 56px 32px 90px; background: #fbfbfc; color: #0f172a;
+        font-family: -apple-system, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1240px; margin: 0 auto; }
+  .eyebrow { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: #6b7280; }
+  h1 { margin: 10px 0 8px; font-size: 34px; letter-spacing: -.02em; }
+  .lede { margin: 0 0 34px; color: #4b5563; font-size: 15px; line-height: 1.75; max-width: 840px; }
+  .lede b { color: #0f172a; }
+  .panel { background: #fff; border: 1px solid #e8eaee; border-radius: 20px; padding: 26px 26px 14px;
+           margin-bottom: 30px; box-shadow: 0 10px 30px rgba(15,23,42,.04); }
+  .ph { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .ph h2 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
+  .pill { border-radius: 999px; padding: 6px 14px; color: #fff; font-size: 12.5px; font-weight: 600; }
+  .panel .sub { margin: 8px 0 14px; font-size: 13px; color: #6b7280; line-height: 1.6; }
+  .legend { display: flex; gap: 24px; flex-wrap: wrap; margin: 4px 0 28px; font-size: 12.5px; color: #6b7280; }
+  .legend i { display: inline-block; width: 24px; height: 3px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+  th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid #eef0f3; }
+  th { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .good { color: #147d5c; } .warn { color: #e8590c; }
+  .foot { margin: 18px 0 6px; font-size: 12.5px; color: #6b7280; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Damai · Appium 预约快路</div>
+  <h1>标准模式 vs 极速模式</h1>
+  <p class="lede">差别不在「点得快」，而在<b>开售瞬间要不要读页面</b>。标准模式每一步都要用 dump（1.5 秒一次）或 OCR 确认页面状态；极速模式把页面判断压成 0.1 秒的 Activity 查询，点击位置全部提前算好。</p>
+
+  <div class="legend">
+    <span><i style="background:#0071e3"></i>预热 / 说明</span>
+    <span><i style="background:#e8590c"></i>关键动作</span>
+    <span><i style="background:#147d5c"></i>校验 / 记录</span>
+    <span><i style="background:#c9ced8"></i>右侧数字为实测累计耗时</span>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>① 标准模式（fast_mode = false）</h2><span class="pill" style="background:#334155">≈ 9.1 s 到达确认页</span></div>
+    <p class="sub">每一步都要问「现在到哪一步了」——贵在读取，不在点击。实测整轮 9.1 s。</p>
+    <svg viewBox="0 0 1180 854" width="100%" role="img">
+<defs>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#0f172a"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#147d5c"/></marker>
+<marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+</defs>
+<rect x="64" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="148" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">抢票脚本</text>
+<line x1="148" y1="64" x2="148" y2="828" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="324" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="408" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">adb 通道</text>
+<line x1="408" y1="64" x2="408" y2="828" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="584" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="668" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">大麦 App</text>
+<line x1="668" y1="64" x2="668" y2="828" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="864" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="948" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">页面识别</text>
+<line x1="948" y1="64" x2="948" y2="828" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<line x1="1104" y1="86" x2="1104" y2="822" stroke="#e2e5ea" stroke-width="1"/>
+<text x="1104" y="74" text-anchor="middle" font-size="10.5" letter-spacing=".08em" fill="#6b7280">累计</text>
+<rect x="60" y="104" width="944" height="34" rx="9" fill="#f6f7f9"/>
+<rect x="60" y="104" width="4" height="34" rx="2" fill="#0071e3"/>
+<text x="78" y="126" font-size="12.5" fill="#4b5563">开售前 12 秒：dump 一次底栏坐标并缓存，放行瞬间不再读页面</text>
+<path d="M148,168 h58 v24 h-58" fill="none" stroke="#e8590c" stroke-width="1.5" marker-end="url(#ao)"/>
+<text x="218" y="167" text-anchor="start" font-size="12.5" fill="#e8590c" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">定时放行 · 调度偏差 0.1–0.5 ms</text>
+<line x1="154" y1="230" x2="400" y2="230" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="221" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">input tap 底栏 (700,2305)</text>
+<line x1="1034" y1="230" x2="1104" y2="230" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="230" x2="1112" y2="230" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="230" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">0.5 s</text>
+<line x1="414" y1="284" x2="660" y2="284" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="420" y="275" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">点「立即预订」</text>
+<path d="M668,330 h58 v24 h-58" fill="none" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="738" y="329" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">跳转 NcovSkuActivity（选票档页）</text>
+<line x1="154" y1="392" x2="940" y2="392" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="383" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">screencap + OCR 轮询（每轮 ≈2 s）</text>
+<line x1="1034" y1="392" x2="1104" y2="392" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="392" x2="1112" y2="392" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="392" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">≈2.5 s</text>
+<line x1="942" y1="446" x2="156" y2="446" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="936" y="437" text-anchor="end" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">票档卡片 + 缺货标记 + 价格坐标</text>
+<line x1="154" y1="500" x2="400" y2="500" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="491" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">tap 票档 (220,1388) → tap 确定</text>
+<line x1="1034" y1="500" x2="1104" y2="500" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="500" x2="1112" y2="500" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="500" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">0.7 s</text>
+<path d="M668,546 h58 v24 h-58" fill="none" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="738" y="545" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">加载 DmOrderActivity（确认页）</text>
+<line x1="1034" y1="554" x2="1104" y2="554" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="554" x2="1112" y2="554" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="554" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">≈2.5 s</text>
+<line x1="154" y1="608" x2="940" y2="608" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="599" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">dumpsys 等切换，再 dump（1.5 s/次）</text>
+<line x1="1034" y1="608" x2="1104" y2="608" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="608" x2="1112" y2="608" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="608" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">≈3.3 s</text>
+<line x1="942" y1="662" x2="156" y2="662" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="936" y="653" text-anchor="end" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">¥899 / 已选 1 位 / 提交坐标</text>
+<rect x="60" y="698" width="944" height="34" rx="9" fill="#f6f7f9"/>
+<rect x="60" y="698" width="4" height="34" rx="2" fill="#147d5c"/>
+<text x="78" y="720" font-size="12.5" fill="#4b5563">校验：观演人数 = 1 → 通过；不一致则拦下，不提交</text>
+<line x1="154" y1="770" x2="400" y2="770" stroke="#e8590c" stroke-width="1.5" marker-end="url(#ao)"/>
+<text x="160" y="761" text-anchor="start" font-size="12.5" fill="#e8590c" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">tap 立即提交（if_commit_order 打开时）</text>
+</svg>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>② 极速模式（fast_mode = true）</h2><span class="pill" style="background:#147d5c">≈ 1.9 s 提交发出</span></div>
+    <p class="sub">票档与观演人由你在 App 里预选好，脚本只负责三次点击。实测提交发出 ≈ 1.9 s。</p>
+    <svg viewBox="0 0 1180 584" width="100%" role="img">
+<defs>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#0f172a"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#147d5c"/></marker>
+<marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+</defs>
+<rect x="64" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="148" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">抢票脚本</text>
+<line x1="148" y1="64" x2="148" y2="558" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="324" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="408" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">adb 通道</text>
+<line x1="408" y1="64" x2="408" y2="558" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="584" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="668" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">大麦 App</text>
+<line x1="668" y1="64" x2="668" y2="558" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="864" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="948" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">页面识别</text>
+<line x1="948" y1="64" x2="948" y2="558" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<line x1="1104" y1="86" x2="1104" y2="552" stroke="#e2e5ea" stroke-width="1"/>
+<text x="1104" y="74" text-anchor="middle" font-size="10.5" letter-spacing=".08em" fill="#6b7280">累计</text>
+<rect x="60" y="104" width="944" height="34" rx="9" fill="#f6f7f9"/>
+<rect x="60" y="104" width="4" height="34" rx="2" fill="#0071e3"/>
+<text x="78" y="126" font-size="12.5" fill="#4b5563">开售前 12 秒：dump 底部坐标 + 校验演出名，全在关键路径之外</text>
+<path d="M148,168 h58 v24 h-58" fill="none" stroke="#e8590c" stroke-width="1.5" marker-end="url(#ao)"/>
+<text x="218" y="167" text-anchor="start" font-size="12.5" fill="#e8590c" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">定时放行 · 调度偏差 0.1–0.5 ms</text>
+<line x1="154" y1="230" x2="400" y2="230" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="221" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">input tap 底栏 (700,2305)</text>
+<line x1="1034" y1="230" x2="1104" y2="230" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="230" x2="1112" y2="230" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="230" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">0.45 s</text>
+<line x1="154" y1="284" x2="940" y2="284" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="275" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">dumpsys 判断当前 Activity（0.1 s/次）</text>
+<line x1="1034" y1="284" x2="1104" y2="284" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="284" x2="1112" y2="284" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="284" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">0.6 s</text>
+<line x1="154" y1="338" x2="400" y2="338" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="329" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">等 0.45 s 渲染 → tap 确定 (843,2315)</text>
+<line x1="1034" y1="338" x2="1104" y2="338" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="338" x2="1112" y2="338" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="338" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">1.0 s</text>
+<line x1="154" y1="392" x2="940" y2="392" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="383" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">dumpsys 判断已到 DmOrderActivity</text>
+<line x1="1034" y1="392" x2="1104" y2="392" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="392" x2="1112" y2="392" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="392" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">1.2 s</text>
+<line x1="154" y1="446" x2="400" y2="446" stroke="#e8590c" stroke-width="1.5" marker-end="url(#ao)"/>
+<text x="160" y="437" text-anchor="start" font-size="12.5" fill="#e8590c" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">等 0.6 s 渲染 → tap 立即提交</text>
+<line x1="1034" y1="446" x2="1104" y2="446" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="446" x2="1112" y2="446" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="446" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">1.9 s</text>
+<rect x="60" y="482" width="944" height="34" rx="9" fill="#f6f7f9"/>
+<rect x="60" y="482" width="4" height="34" rx="2" fill="#147d5c"/>
+<text x="78" y="504" font-size="12.5" fill="#4b5563">提交已发出；之后才截图 OCR 记录结果，不阻塞下单</text>
+</svg>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>③ 极速模式的兜底分支</h2><span class="pill" style="background:#e8590c">≈ 6.9 s 退化为标准链路</span></div>
+    <p class="sub">「确定」点了不生效（票档没预选、底部还是 ¥0）时，自动退回 OCR 现场补一次，不会卡死。</p>
+    <svg viewBox="0 0 1180 368" width="100%" role="img">
+<defs>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#0f172a"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#147d5c"/></marker>
+<marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+</defs>
+<rect x="64" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="148" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">抢票脚本</text>
+<line x1="148" y1="64" x2="148" y2="342" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="324" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="408" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">adb 通道</text>
+<line x1="408" y1="64" x2="408" y2="342" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="584" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="668" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">大麦 App</text>
+<line x1="668" y1="64" x2="668" y2="342" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<rect x="864" y="22" width="168" height="42" rx="10" fill="#0f172a"/>
+<text x="948" y="49" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">页面识别</text>
+<line x1="948" y1="64" x2="948" y2="342" stroke="#d7dbe2" stroke-width="1.4" stroke-dasharray="4 6"/>
+<line x1="1104" y1="86" x2="1104" y2="336" stroke="#e2e5ea" stroke-width="1"/>
+<text x="1104" y="74" text-anchor="middle" font-size="10.5" letter-spacing=".08em" fill="#6b7280">累计</text>
+<rect x="60" y="104" width="944" height="34" rx="9" fill="#f6f7f9"/>
+<rect x="60" y="104" width="4" height="34" rx="2" fill="#e8590c"/>
+<text x="78" y="126" font-size="12.5" fill="#4b5563">点「确定」后 3 秒没进确认页：票档没预选，底部仍是 ¥0</text>
+<line x1="154" y1="176" x2="940" y2="176" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="167" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">回退 OCR：截图识别票档卡片</text>
+<line x1="1034" y1="176" x2="1104" y2="176" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="176" x2="1112" y2="176" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="176" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">≈2.5 s</text>
+<line x1="154" y1="230" x2="400" y2="230" stroke="#0f172a" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="160" y="221" text-anchor="start" font-size="12.5" fill="#0f172a" stroke="#fff" stroke-width="3.4" paint-order="stroke" stroke-linejoin="round">tap 票档 → tap 确定</text>
+<line x1="1034" y1="230" x2="1104" y2="230" stroke="#e8ebef" stroke-width="1" stroke-dasharray="2 5"/>
+<line x1="1096" y1="230" x2="1112" y2="230" stroke="#b9c0cb" stroke-width="1"/>
+<text x="1120" y="230" dominant-baseline="middle" font-size="12" font-weight="600" fill="#4b5563" stroke="#fff" stroke-width="3" paint-order="stroke">3.2 s</text>
+<rect x="60" y="266" width="944" height="34" rx="9" fill="#f6f7f9"/>
+<rect x="60" y="266" width="4" height="34" rx="2" fill="#e8590c"/>
+<text x="78" y="288" font-size="12.5" fill="#4b5563">之后与标准模式相同：dump 校验 → 提交，实测整轮 6.9 s</text>
+</svg>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>时间都花在哪</h2></div>
+    <table>
+      <tr><th>环节</th><th>标准模式</th><th>极速模式</th><th>说明</th></tr>
+      <tr><td>点击底栏</td><td class="num">0.5 s</td><td class="num">0.45 s</td><td>同一次 adb tap</td></tr>
+      <tr><td>判断「当前在哪个页面」</td><td class="num">1.5 s/次</td><td class="num good">0.1 s/次</td><td>dump 走无障碍树；dumpsys 只读 Activity 名</td></tr>
+      <tr><td>选票档</td><td class="num">3.0 s</td><td class="num good">0 s</td><td>极速模式依赖 App 里已预选票档</td></tr>
+      <tr><td>读取确认页（金额 / 人数）</td><td class="num">3.3 s</td><td class="num warn">跳过</td><td>极速模式不看页面，提交后再补记录</td></tr>
+      <tr><td>合计</td><td class="num">9.1 s</td><td class="num good">1.9 s</td><td>约 4.8 倍</td></tr>
+    </table>
+    <p class="foot">
+      数据来源：OPPO PHM110（1080×2412，Android 15，大麦 9.0.38）实机，同一场演出反复跑出来的分段日志。<br>
+      票档没预选时极速模式退化为 6.9 s——仍比标准模式快一点，因为省掉了确认页的读取。
+    </p>
+  </div>
+</div>
+</body>
+</html>
