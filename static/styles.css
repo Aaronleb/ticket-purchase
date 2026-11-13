@@ -412,3 +412,10 @@ dialog p:not(.section-number) { color: var(--muted); font-size: 13px; line-heigh
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.advanced-block { margin-top: 16px; border-radius: 14px; background: var(--paper); padding: 0 14px; }
+.advanced-block > summary { cursor: pointer; list-style: none; padding: 12px 0; font-size: 11px; color: var(--muted); }
+.advanced-block > summary::-webkit-details-marker { display: none; }
+.advanced-block > summary::after { content: "＋"; float: right; }
+.advanced-block[open] > summary::after { content: "－"; }
+.advanced-block .field-grid { padding-bottom: 14px; }

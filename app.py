@@ -308,6 +308,7 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1", help="仅允许本机地址")
     parser.add_argument("--project-root", type=Path, default=default_project_root())
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--android-only", action="store_true", help="只启用安卓端，隐藏 PC 入口")
     args = parser.parse_args()
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         parser.error("为避免远程触发抢票，只允许监听本机地址")
@@ -315,7 +316,9 @@ def main() -> int:
         parser.error("端口必须在 0 到 65535 之间")
 
     try:
-        server = create_server(args.project_root, args.port)
+        server = create_server(
+            args.project_root, args.port, android_only=args.android_only
+        )
     except OSError as exc:
         print(f"无法启动 Web 服务：{exc}", file=sys.stderr)
         return 1

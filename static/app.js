@@ -79,6 +79,9 @@ function readAndroidConfig() {
     ticket_count: Number($("#android-ticket-count").value),
     sell_start_time: $("#android-sell-start-time").value,
     if_commit_order: $("#android-if-commit").checked,
+    fast_mode: $("#android-fast-mode").checked,
+    confirm_point: $("#android-confirm-point").value.trim(),
+    submit_point: $("#android-submit-point").value.trim(),
   };
 }
 
@@ -90,6 +93,9 @@ function fillAndroidConfig(config) {
   $("#android-ticket-count").value = config.ticket_count ?? 1;
   $("#android-sell-start-time").value = config.sell_start_time ? config.sell_start_time.slice(0, 19) : "";
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
+  $("#android-fast-mode").checked = config.fast_mode !== false;
+  $("#android-confirm-point").value = config.confirm_point || "";
+  $("#android-submit-point").value = config.submit_point || "";
 }
 
 function validateConfig(config, platform) {

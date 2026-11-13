@@ -1,13 +1,18 @@
 {
   "server_url": "http://127.0.0.1:4723",
-  "keyword": "周深",
-  "users": [
-    "王胜",
-    "潘鸿运"
-  ],
-  "city": "深圳",
-  "date": "12.06",
-  "price": "内场1199元",
-  "price_index": 5,
-  "if_commit_order": true
+  "device_name": "",
+  "platform_version": "15",
+  "keyword": "陆虎",
+  "users": [],
+  "city": "",
+  "date": "",
+  "price": "看台899元",
+  "price_index": 0,
+  "ticket_count": 1,
+  "sell_start_time": "2026-11-16T13:52:21+08:00",
+  "if_commit_order": false,
+  "fast_mode": true,
+  "confirm_point": "",
+  "submit_point": "",
+  "auto_select": true
 }

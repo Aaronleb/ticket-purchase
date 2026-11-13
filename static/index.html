@@ -103,7 +103,16 @@
 
         <div class="preference-row android-preferences">
           <label class="toggle-field danger-toggle"><input id="android-if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>关闭时停在订单确认页，启动前会再次确认</small></span></label>
+          <label class="toggle-field"><input id="android-fast-mode" type="checkbox"><span class="toggle"></span><span><strong>极速模式</strong><small>开售瞬间只按坐标点「确定」「立即提交」，不读页面不拍照；失败自动回退到识别流程</small></span></label>
         </div>
+
+        <details class="advanced-block">
+          <summary>坐标（选填，留空按屏幕比例自动算）</summary>
+          <div class="field-grid">
+            <label class="field"><span>「确定」坐标</span><input id="android-confirm-point" type="text" placeholder="例如 843,2315" autocomplete="off"></label>
+            <label class="field"><span>「立即提交」坐标</span><input id="android-submit-point" type="text" placeholder="例如 788,2319" autocomplete="off"></label>
+          </div>
+        </details>
 
         <div class="form-footer">
           <span id="android-save-state">配置保存在原项目的 damai_appium/config.jsonc</span>

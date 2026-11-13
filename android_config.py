@@ -23,6 +23,11 @@ DEFAULT_ANDROID_CONFIG = {
     "ticket_count": 1,
     "sell_start_time": "",
     "if_commit_order": False,
+    # 极速模式：开售瞬间只按坐标点“确定/立即提交”，不 OCR、不 dump
+    "fast_mode": True,
+    # 坐标留空则按屏幕比例换算
+    "confirm_point": "",
+    "submit_point": "",
 }
 
 
