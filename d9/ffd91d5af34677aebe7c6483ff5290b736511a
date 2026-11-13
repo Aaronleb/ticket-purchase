@@ -1,0 +1,20 @@
+.gitignore
+  h_6d5d227c7546e9 205-207
+docs/sequence.html
+  h_6d5d227c7546e9 1-238
+tools/build_ocr.sh
+  h_6d5d227c7546e9 1-6
+tools/damai_ocr.swift
+  h_6d5d227c7546e9 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d9ffd91d5af34677aebe7c6483ff5290b736511a",
+  "prompts": {},
+  "humans": {
+    "h_6d5d227c7546e9": {
+      "author": "ext.lierbao1 <ext.lierbao1@jd.com>"
+    }
+  }
+}
