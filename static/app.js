@@ -82,6 +82,7 @@ function readAndroidConfig() {
     fast_mode: $("#android-fast-mode").checked,
     confirm_point: $("#android-confirm-point").value.trim(),
     submit_point: $("#android-submit-point").value.trim(),
+    buy_point: $("#android-buy-point").value.trim(),
   };
 }
 
@@ -96,6 +97,7 @@ function fillAndroidConfig(config) {
   $("#android-fast-mode").checked = config.fast_mode !== false;
   $("#android-confirm-point").value = config.confirm_point || "";
   $("#android-submit-point").value = config.submit_point || "";
+  $("#android-buy-point").value = config.buy_point || "";
 }
 
 function validateConfig(config, platform) {
@@ -272,6 +274,50 @@ async function refreshAndroidDevices() {
 
 $("#android-device-name").addEventListener("change", (event) => selectAndroidDevice(event.target.value.trim()));
 $("#android-refresh-devices").addEventListener("click", refreshAndroidDevices);
+
+async function checkTimeSync() {
+  const button = $("#android-time-sync");
+  const hint = $("#android-time-sync-hint");
+  button.disabled = true;
+  hint.textContent = "正在对时（读取手机时钟与服务器时间）…";
+  const format = (ms) => `${ms >= 0 ? "+" : ""}${ms.toFixed(1)} 毫秒`;
+  try {
+    const result = await api("/api/android/time-sync");
+    const parts = [];
+    if (result.phone_offset_ms !== null) parts.push(`本机与手机偏差 ${format(result.phone_offset_ms)}`);
+    if (result.server_offset_ms !== null) parts.push(`本机与阿里服务器偏差 ${format(result.server_offset_ms)}`);
+    hint.textContent = parts.length ? `${parts.join("；")}。抢票放行已自动对齐手机时钟。` : "对时失败：手机与服务器都不可达。";
+    toast("对时完成");
+  } catch (error) {
+    hint.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+$("#android-time-sync").addEventListener("click", checkTimeSync);
+
+async function calibrateAndroidPoint() {
+  const button = $("#android-calibrate");
+  const hint = $("#android-calibrate-hint");
+  const defaultHint = hint.textContent;
+  button.disabled = true;
+  button.textContent = "识别中…";
+  hint.textContent = "正在截图识别当前页面按钮…（首次约 5 秒，为 OCR 预热）";
+  try {
+    const result = await api("/api/android/calibrate", { method: "POST" });
+    fillAndroidConfig(result.config);
+    hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。`;
+    toast(`已采集「${result.button}」坐标 ${result.point}`);
+  } catch (error) {
+    hint.textContent = `${error.message}（${defaultHint}）`;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "采集当前页按钮坐标";
+  }
+}
+$("#android-calibrate").addEventListener("click", calibrateAndroidPoint);
 
 $("#config-form").addEventListener("submit", async (event) => {
   event.preventDefault();

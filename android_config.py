@@ -28,6 +28,8 @@ DEFAULT_ANDROID_CONFIG = {
     # 坐标留空则按屏幕比例换算
     "confirm_point": "",
     "submit_point": "",
+    # 详情页底栏「立即购票」：留空则开售前自动 dump 定位，失败按比例兜底
+    "buy_point": "",
 }
 
 

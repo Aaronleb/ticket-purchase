@@ -203,5 +203,4 @@ docs/plans/2026-11-07-android-dmg-implementation.md
 .runtime/
 !packaging/DamaiAndroid.spec
 
-# 编译产物（用 tools/build_ocr.sh 现场编译）
-tools/damai_ocr
+# 注意：tools/damai_ocr 现为 Python 源码（RapidOCR 实现），需要纳入版本管理

@@ -103,15 +103,18 @@
 
         <div class="preference-row android-preferences">
           <label class="toggle-field danger-toggle"><input id="android-if-commit" type="checkbox"><span class="toggle"></span><span><strong>自动提交订单</strong><small>关闭时停在订单确认页，启动前会再次确认</small></span></label>
-          <label class="toggle-field"><input id="android-fast-mode" type="checkbox"><span class="toggle"></span><span><strong>极速模式</strong><small>开售瞬间只按坐标点「确定」「立即提交」，不读页面不拍照；失败自动回退到识别流程</small></span></label>
+          <label class="toggle-field"><input id="android-fast-mode" type="checkbox"><span class="toggle"></span><span><strong>极速模式</strong><small>开售瞬间只按坐标点「确定」「立即提交」，不读页面不拍照；失败直接结束并提示原因</small></span></label>
         </div>
 
         <details class="advanced-block">
           <summary>坐标（选填，留空按屏幕比例自动算）</summary>
           <div class="field-grid">
+            <label class="field"><span>「立即购票」坐标</span><input id="android-buy-point" type="text" placeholder="例如 764,2556" autocomplete="off"></label>
             <label class="field"><span>「确定」坐标</span><input id="android-confirm-point" type="text" placeholder="例如 843,2315" autocomplete="off"></label>
             <label class="field"><span>「立即提交」坐标</span><input id="android-submit-point" type="text" placeholder="例如 788,2319" autocomplete="off"></label>
           </div>
+          <button id="android-calibrate" class="button button-outline" type="button">采集当前页按钮坐标</button>
+          <p id="android-calibrate-hint" class="field-hint">把大麦依次停在详情页 → 选票档页 → 确认页，每页点一次本按钮，即可自动识别按钮位置并写入上方坐标（顺带完成 OCR 预热）。</p>
         </details>
 
         <div class="form-footer">
@@ -142,6 +145,8 @@
               <li>停在目标详情页，保持 Mac 与手机唤醒并启用系统自动校时</li>
             </ol>
             <button id="android-refresh-devices" class="button button-outline button-block" type="button">重新检测设备</button>
+            <button id="android-time-sync" class="button button-outline button-block" type="button">对时检查</button>
+            <p id="android-time-sync-hint" class="operation-hint">测量本机与手机、大麦服务器的时钟偏差，抢票时会自动对齐手机时钟。</p>
           </div>
           <div class="operation-divider"></div>
           <button id="check-button" class="button button-outline button-block" type="button">运行环境自检</button>

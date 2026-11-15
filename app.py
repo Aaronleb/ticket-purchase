@@ -12,7 +12,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from android_calibrate import calibrate_android_point
 from android_config import AndroidConfigStore
+from time_sync import measure_time_sync
 from android_environment import AndroidEnvironment
 from config_store import ConfigError, ConfigStore, default_project_root
 from process_manager import ProcessManager, TaskBusy, TaskError, TaskNotRunning
@@ -97,6 +99,19 @@ class WebApplication:
 
     def check_android(self):
         return self.android_environment.check(self.android_store.load())
+
+    def calibrate_android(self):
+        """识别手机当前页面，把对应按钮坐标写回配置。"""
+        config = self.android_store.load()
+        result = calibrate_android_point(config.get("device_name", ""))
+        config[result["field"]] = result["point"]
+        result["config"] = self.android_store.save(config)
+        return result
+
+    def time_sync_android(self):
+        """测量本机与手机、阿里系服务器的时钟偏差。"""
+        config = self.android_store.load()
+        return measure_time_sync(config.get("device_name") or None)
 
     def list_android_devices(self):
         return self.android_environment.list_devices()
@@ -206,6 +221,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.start_check())
             elif method == "POST" and path == "/api/android/check":
                 self._json(200, app.check_android())
+            elif method == "POST" and path == "/api/android/calibrate":
+                self._json(200, app.calibrate_android())
+            elif method == "GET" and path == "/api/android/time-sync":
+                self._json(200, app.time_sync_android())
             elif method == "POST" and path == "/api/login":
                 self._json(200, app.start_login())
             elif method == "POST" and path == "/api/login/complete":
