@@ -11,7 +11,7 @@ import re
 import subprocess
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -501,6 +501,30 @@ class DamaiBot:
     def _wait_for_sale(self):
         return wait_for_sale_time(self.config.sell_start_time)
 
+    def _align_clock_with_phone(self):
+        """把放行目标对齐到手机时钟（大麦倒计时以手机本地时钟渲染）。
+
+        偏差 = 本机 - 手机（正数 = 本机偏快）；手机走到开售时刻时本机
+        走得更靠前，所以本机等待目标要相应加上偏差。
+        """
+        try:
+            output = self._adb("shell", "echo", "$EPOCHREALTIME", timeout=10)
+            phone_epoch = float(output.stdout.strip())
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            print(f"时钟对齐跳过：无法读取手机时钟（{exc}）")
+            return
+        offset = time.time() - phone_epoch
+        if abs(offset) < 0.002:
+            print(f"本机与手机时钟偏差 {offset * 1000:+.1f} 毫秒，无需修正")
+            return
+        adjusted = parse_sale_time(self.config.sell_start_time)
+        adjusted += timedelta(seconds=offset)
+        self.config.sell_start_time = adjusted.isoformat()
+        print(
+            f"本机比手机{'快' if offset > 0 else '慢'} {abs(offset) * 1000:.1f} 毫秒，"
+            f"放行时刻已对齐手机时钟：{self.config.sell_start_time}"
+        )
+
     # ---------- 开抢前：按钮翻转感知 ----------
     FLIP_KEYWORDS = ("立即预订", "立即购票", "立即购买")
     # 开抢前多少秒开始 OCR 轮询底栏文案
@@ -645,6 +669,7 @@ class DamaiBot:
                 return False
             print(f"等待程序定时开抢：{self.config.sell_start_time}")
             self._prepare_buy_point()
+            self._align_clock_with_phone()
             if self.config.fast_mode:
                 release = self._wait_for_sale_with_flip_watch()
             else:
