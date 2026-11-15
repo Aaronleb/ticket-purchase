@@ -504,25 +504,37 @@ class DamaiBot:
     def _align_clock_with_phone(self):
         """把放行目标对齐到手机时钟（大麦倒计时以手机本地时钟渲染）。
 
-        偏差 = 本机 - 手机（正数 = 本机偏快）；手机走到开售时刻时本机
-        走得更靠前，所以本机等待目标要相应加上偏差。
+        偏差 = 本机 - 对方（正数 = 本机偏快）；手机读不到时降级为
+        NTP 服务器偏差（手机与服务器通常都接近标准时间，精度较差）。
         """
+        offset = None
+        source = ""
         try:
             output = self._adb("shell", "echo", "$EPOCHREALTIME", timeout=10)
-            phone_epoch = float(output.stdout.strip())
-        except (ValueError, OSError, subprocess.SubprocessError) as exc:
-            print(f"时钟对齐跳过：无法读取手机时钟（{exc}）")
+            offset = time.time() - float(output.stdout.strip())
+            source = "手机时钟"
+        except Exception as exc:  # noqa: BLE001 - 读不到就降级，不阻断抢票
+            try:
+                from time_sync import measure_server_offset
+
+                server_offset, _detail = measure_server_offset()
+                if server_offset is not None:
+                    offset = server_offset
+                    source = "NTP 服务器（精度降级）"
+            except Exception as exc:  # noqa: BLE001 - 对时失败不阻断抢票
+                print(f"NTP 对齐也不可用：{exc}")
+        if offset is None:
+            print("时钟对齐跳过：手机与 NTP 均不可用，按本机时间放行")
             return
-        offset = time.time() - phone_epoch
         if abs(offset) < 0.002:
-            print(f"本机与手机时钟偏差 {offset * 1000:+.1f} 毫秒，无需修正")
+            print(f"本机与对方时钟偏差 {offset * 1000:+.1f} 毫秒，无需修正")
             return
-        adjusted = parse_sale_time(self.config.sell_start_time)
-        adjusted += timedelta(seconds=offset)
+        adjusted = parse_sale_time(self.config.sell_start_time) + timedelta(seconds=offset)
         self.config.sell_start_time = adjusted.isoformat()
         print(
-            f"本机比手机{'快' if offset > 0 else '慢'} {abs(offset) * 1000:.1f} 毫秒，"
-            f"放行时刻已对齐手机时钟：{self.config.sell_start_time}"
+            f"以{source}为准：本机{'快' if offset > 0 else '慢'} "
+            f"{abs(offset) * 1000:.1f} 毫秒，"
+            f"放行时刻已对齐：{self.config.sell_start_time}"
         )
 
     # ---------- 开抢前：按钮翻转感知 ----------
@@ -553,30 +565,54 @@ class DamaiBot:
             warm_rows = self._ocr()
             print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
         except Exception as exc:
-            print(f"OCR 预热失败（{exc}），跳过按钮翻转感知，改纯定时")
-            return self._wait_for_sale()
-        width, height = self._adb_size()
+            print(f"OCR 预热失败（{exc}），按钮翻转感知将只靠 u2 事件监听")
         remaining = (target - datetime.now(SHANGHAI)).total_seconds()
         if remaining > self.FLIP_WATCH_FROM:
             time.sleep(remaining - self.FLIP_WATCH_FROM)
+        # 优先 u2 事件监听（设备端等待，百毫秒级）；agent 不可用退回 OCR 轮询
+        watch = None
+        watch_name = "OCR 轮询"
+        try:
+            from flip_watch import make_flip_watcher
+
+            watch_name, watch = make_flip_watcher(self.config.device_name)
+        except Exception as exc:
+            print(f"u2 事件监听不可用（{exc}），退回 OCR 轮询感知")
+        if watch is None and self._ocr is None:
+            print("无可用感知手段，改纯定时")
+            return self._wait_for_sale()
+        print(f"按钮翻转感知：{watch_name}")
+        width, height = self._adb_size()
         failures = 0
         while True:
             remaining = (target - datetime.now(SHANGHAI)).total_seconds()
             if remaining <= 0.3:
                 print("到点未感知到按钮翻转，按精准定时放行（底栏重试兜底）")
                 return self._wait_for_sale()
-            try:
-                rows = self._ocr()
-                failures = 0
-            except Exception as exc:
-                failures += 1
-                print(f"翻转感知第 {failures} 轮识别失败：{exc}")
-                if failures >= self.FLIP_MAX_FAILURES:
-                    print("识别连续失败，放弃感知，改纯定时")
-                    return self._wait_for_sale()
-                time.sleep(self.FLIP_POLL_INTERVAL)
-                continue
-            if self._flip_detected(rows, height):
+            if watch is not None:
+                try:
+                    flipped = watch(remaining - 0.3)
+                    failures = 0
+                except Exception as exc:
+                    flipped = False
+                    failures += 1
+                    print(f"翻转感知第 {failures} 轮异常：{exc}")
+                    if failures >= self.FLIP_MAX_FAILURES:
+                        print("感知连续异常，放弃感知，改纯定时")
+                        return self._wait_for_sale()
+            else:
+                try:
+                    rows = self._ocr()
+                    failures = 0
+                    flipped = self._flip_detected(rows, height)
+                except Exception as exc:
+                    flipped = False
+                    failures += 1
+                    print(f"翻转感知第 {failures} 轮识别失败：{exc}")
+                    if failures >= self.FLIP_MAX_FAILURES:
+                        print("识别连续失败，放弃感知，改纯定时")
+                        return self._wait_for_sale()
+            if flipped:
                 released_at = datetime.now(SHANGHAI)
                 print(
                     f"感知到底栏已变为可购买状态，"
@@ -588,7 +624,6 @@ class DamaiBot:
                     target_monotonic=time.monotonic() + max(remaining, 0.0),
                     released_monotonic=time.monotonic(),
                 )
-            time.sleep(self.FLIP_POLL_INTERVAL)
 
     def _tap_buy_bar_until_next_page(self, point):
         """到点直点底栏直到离开详情页。

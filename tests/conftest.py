@@ -2,7 +2,12 @@
 Shared pytest fixtures and configuration.
 """
 import os
+import sys
 import tempfile
+
+# 允许 tests 内的平铺导入（如 `from test_android_config import ...`）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from pathlib import Path
 from typing import Generator
 from unittest.mock import Mock, patch

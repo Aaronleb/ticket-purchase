@@ -4,6 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import Mock, mock_open
 
 import pytest
+
+pytest.skip(
+    "本模块针对已移除的 Appium 链路（WebDriver/BUY_NOW_SELECTOR），"
+    "方案 B 重写为 adb+OCR 预约快路后整体失效；新流程测试见 "
+    "test_flip_watch.py / test_sale_clock.py。待按新 API 重写。",
+    allow_module_level=True,
+)
+
 from selenium.common.exceptions import TimeoutException
 
 from damai_appium.config import Config
