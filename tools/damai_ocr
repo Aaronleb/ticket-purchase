@@ -1,0 +1,34 @@
+#!/Users/aaron/Documents/project/damai/ticket-purchase/.venv/bin/python
+# -*- coding: UTF-8 -*-
+"""OCR 命令行工具：识别截图中的文字并输出 "x\\ty\\t置信度\\t文本"。
+
+与原本地 Swift/Vision 版（tools/damai_ocr.swift）接口一致：
+参数为图片路径，stdout 每行一条识别结果，供 damai_app_v2._ocr() 解析。
+当前用 Python + RapidOCR(onnxruntime) 实现，规避 Command Line Tools
+的 swiftc 与 SDK 版本不匹配、无法编译 Vision 版的问题。
+"""
+import sys
+
+from rapidocr_onnxruntime import RapidOCR
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("用法：damai_ocr <图片路径>", file=sys.stderr)
+        return 2
+    result, _elapse = RapidOCR()(sys.argv[1])
+    if not result:
+        return 0
+    for box, text, score in result:
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+        cx = int(sum(xs) / len(xs))
+        cy = int(sum(ys) / len(ys))
+        text = " ".join(str(text).split())
+        if text:
+            print(f"{cx}\t{cy}\t{float(score):.3f}\t{text}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

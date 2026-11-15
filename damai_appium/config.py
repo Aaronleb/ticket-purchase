@@ -19,6 +19,7 @@ class Config:
         fast_mode=True,
         confirm_point="",
         submit_point="",
+        buy_point="",
     ):
         self.server_url = server_url
         self.if_commit_order = if_commit_order
@@ -36,6 +37,7 @@ class Config:
         self.fast_mode = fast_mode
         self.confirm_point = (confirm_point or "").strip()
         self.submit_point = (submit_point or "").strip()
+        self.buy_point = (buy_point or "").strip()
 
     @staticmethod
     def load_config():
@@ -55,4 +57,5 @@ class Config:
             config.get("fast_mode", True),
             config.get("confirm_point", ""),
             config.get("submit_point", ""),
+            config.get("buy_point", ""),
         )

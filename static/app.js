@@ -82,6 +82,7 @@ function readAndroidConfig() {
     fast_mode: $("#android-fast-mode").checked,
     confirm_point: $("#android-confirm-point").value.trim(),
     submit_point: $("#android-submit-point").value.trim(),
+    buy_point: $("#android-buy-point").value.trim(),
   };
 }
 
@@ -96,6 +97,7 @@ function fillAndroidConfig(config) {
   $("#android-fast-mode").checked = config.fast_mode !== false;
   $("#android-confirm-point").value = config.confirm_point || "";
   $("#android-submit-point").value = config.submit_point || "";
+  $("#android-buy-point").value = config.buy_point || "";
 }
 
 function validateConfig(config, platform) {

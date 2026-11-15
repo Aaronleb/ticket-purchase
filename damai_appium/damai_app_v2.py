@@ -35,13 +35,19 @@ SUBMIT_TEXTS = ("立即提交", "提交订单")
 SKU_MARKERS = ("场次", "票档")
 NETWORK_ERROR_MARKERS = ("网络不太顺畅", "努力刷新")
 VIEWER_CHECKBOX_ID = "cn.damai:id/checkbox"
-# 极速模式的兜底坐标（按 1080x2412 实测，换算成比例以适配分辨率）
-CONFIRM_POINT_RATIO = (0.781, 0.960)
-SUBMIT_POINT_RATIO = (0.730, 0.961)
+# 极速模式的兜底坐标（按 1220x2712 实测：确定/立即提交都在底部栏中央，
+# 旧比例 0.96 按 1080x2412 推算，在本机会偏出按钮约 40px 导致直点失效；
+# 配置里写了 confirm_point/submit_point 精确坐标时优先用配置值）
+CONFIRM_POINT_RATIO = (0.779, 0.945)
+SUBMIT_POINT_RATIO = (0.789, 0.945)
 
 
 class ConfirmationError(RuntimeError):
     """订单确认页不符合提交条件。"""
+
+
+class TicketUnavailableError(RuntimeError):
+    """配置的票档不存在或已缺货：直接结束，不再尝试其他票档。"""
 
 
 def parse_amount(text):
@@ -96,6 +102,13 @@ class DamaiBot:
         if "ProjectDetailActivity" not in activity:
             print(f"提示：当前不在演出详情页（{activity or '未知'}），开抢时可能失败")
             return
+        if self.config.buy_point:
+            match = re.match(r"^\s*(\d+)\s*[,x]\s*(\d+)\s*$", self.config.buy_point)
+            if match:
+                self._buy_point = (int(match.group(1)), int(match.group(2)))
+                print(f"使用配置的底栏坐标 {self._buy_point}（跳过页面读取）")
+                return
+            print(f"底栏坐标格式不正确（{self.config.buy_point}），改用页面读取")
         root = self._ui_dump()
         if root is None:
             print("提示：未能读取页面结构，开抢时改用默认坐标")
@@ -352,26 +365,49 @@ class DamaiBot:
         return all(marker in texts for marker in SKU_MARKERS)
 
     def _choose_price(self, rows=None):
-        """OCR 找票档卡片：优先配置票档，其次第一个未缺货的。"""
+        """OCR 找票档卡片：配置了票档就必须命中，缺货或不在列表都直接结束。
+
+        缺货标签按“同一行内最近的票档”配对——大麦票档是双列布局，
+        只看纵向距离会把同行右侧的可用票档误判成缺货。
+        """
         rows = rows if rows is not None else self._ocr()
-        soldout_ys = [y for _x, y, _c, text in rows if "缺货" in text]
+        soldout_marks = [(x, y) for x, y, _c, text in rows if "缺货" in text]
         options = []
         for x, y, _c, text in rows:
-            if not text.endswith("元"):
-                continue
-            soldout = any(abs(y - soldout_y) < 60 for soldout_y in soldout_ys)
-            options.append((text, (x, y), soldout))
+            if "元" in text and any(ch.isdigit() for ch in text):
+                options.append((text, (x, y)))
+        # 每个“缺货”标签配对同一行内横向最近的票档
+        soldout_points = set()
+        for mark_x, mark_y in soldout_marks:
+            same_row = [
+                (abs(mark_x - x), index)
+                for index, (_text, (x, y)) in enumerate(options)
+                if abs(mark_y - y) < 60
+            ]
+            if same_row:
+                _dist, nearest = min(same_row)
+                soldout_points.add(options[nearest][1])
+        options = [
+            (text, point, point in soldout_points) for text, point in options
+        ]
         if not options:
-            print("OCR 未识别到票档")
-            return False
+            raise TicketUnavailableError("选票档页上没有识别到任何票档（OCR 结果为空）")
         wanted = (self.config.price or "").strip()
-        pick = next((o for o in options if not o[2] and o[0] == wanted), None)
-        if pick is None:
+        if wanted:
+            hit = next((o for o in options if o[0] == wanted), None)
+            if hit is None:
+                seen = "、".join(o[0] for o in options)
+                raise TicketUnavailableError(
+                    f"配置的票档「{wanted}」不在当前列表（页面识别到：{seen}）"
+                )
+            if hit[2]:
+                raise TicketUnavailableError(f"配置的票档「{wanted}」已显示缺货")
+            pick = hit
+        else:
             available = [o for o in options if not o[2]]
-            pick = available[0] if available else None
-        if pick is None:
-            print("所有票档都已缺货登记，停止")
-            return False
+            if not available:
+                raise TicketUnavailableError("所有票档都已缺货登记")
+            pick = available[0]
         print(f"选择票档：{pick[0]}，点击 {pick[1]}")
         self._adb_tap(*pick[1])
         self._mark("识别并选择票档")
@@ -417,7 +453,8 @@ class DamaiBot:
         if not fast:
             rows = self._wait_sku_page(min(time.perf_counter() + SKU_TIMEOUT, deadline))
             if rows is not None:
-                if self.config.auto_select and self._choose_price(rows):
+                if self.config.auto_select:
+                    self._choose_price(rows)
                     time.sleep(0.4)
                 self._tap_sku_confirm(rows)
             self._wait_activity("DmOrderActivity", deadline)
@@ -462,7 +499,8 @@ class DamaiBot:
                 print("“确定”没生效（票档可能没预选），回退到 OCR 选票档")
                 rows = self._ocr()
                 if self._on_sku_page(self._ocr_texts(rows)):
-                    if self.config.auto_select and self._choose_price(rows):
+                    if self.config.auto_select:
+                        self._choose_price(rows)
                         time.sleep(0.4)
                     self._tap_sku_confirm(rows)
                     marker = self._wait_any_activity(
@@ -532,6 +570,9 @@ class DamaiBot:
             return True
         except TimeoutError:
             print("预约快路超时：未找到立即购买或完整订单确认页，已停止")
+            return False
+        except TicketUnavailableError as exc:
+            print(f"票档不可用，直接结束，不再尝试下单：{exc}")
             return False
         except ConfirmationError as exc:
             print(f"{exc}，禁止提交")
