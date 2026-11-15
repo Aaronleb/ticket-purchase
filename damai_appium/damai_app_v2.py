@@ -11,14 +11,27 @@ import re
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 
 try:
     from .config import Config
-    from .sale_clock import SaleTimeError, wait_for_sale_time
+    from .sale_clock import (
+        SHANGHAI,
+        SaleRelease,
+        SaleTimeError,
+        parse_sale_time,
+        wait_for_sale_time,
+    )
 except ImportError:
     from config import Config
-    from sale_clock import SaleTimeError, wait_for_sale_time
+    from sale_clock import (
+        SHANGHAI,
+        SaleRelease,
+        SaleTimeError,
+        parse_sale_time,
+        wait_for_sale_time,
+    )
 
 
 # 从点“确定”到确认页出现的等待窗口
@@ -40,6 +53,11 @@ VIEWER_CHECKBOX_ID = "cn.damai:id/checkbox"
 # 配置里写了 confirm_point/submit_point 精确坐标时优先用配置值）
 CONFIRM_POINT_RATIO = (0.779, 0.945)
 SUBMIT_POINT_RATIO = (0.789, 0.945)
+# 极速模式点底栏：首轮等翻页的窗口（覆盖正常页面跳转时长），
+# 未翻页则按重试节奏再点，覆盖大麦按钮延迟翻转；总预算 BUY_RETRY_TIMEOUT 秒
+BUY_FIRST_WAIT = 0.6
+BUY_RETRY_WAIT = 0.25
+BUY_RETRY_TIMEOUT = 3.5
 
 
 class ConfirmationError(RuntimeError):
@@ -133,26 +151,31 @@ class DamaiBot:
                 return
         print("提示：未找到底栏容器，开抢时改用默认坐标")
 
-    def _tap_buy_now(self):
-        """开售瞬间只做一次 adb 点击：不建会话、不查控件。"""
-        # 详情页会被全屏视频/社区页顶掉，先退回详情页再点
+    def _ensure_detail_page(self):
+        """详情页会被全屏视频/社区页顶掉，先退回详情页。"""
         for _ in range(3):
             activity = self._foreground_activity()
             if "ProjectDetailActivity" in activity:
-                break
+                return
             print(f"前台是 {activity or '未知'}，先返回一层")
             self._adb("input", "keyevent", "4")
             time.sleep(1.2)
-        else:
-            activity = self._foreground_activity()
-            raise RuntimeError(
-                f"前台不是演出详情页（当前 {activity or '未知'}），请先打开要抢的演出页"
-            )
+        activity = self._foreground_activity()
+        raise RuntimeError(
+            f"前台不是演出详情页（当前 {activity or '未知'}），请先打开要抢的演出页"
+        )
+
+    def _buy_bar_point(self):
+        """底栏点击位置：优先开售前缓存/配置坐标，否则按比例兜底。"""
         if self._buy_point:
-            point = self._buy_point
-        else:
-            width, height = self._adb_size()
-            point = (int(width * 0.65), height - BUY_BAR_TAP_OFFSET)
+            return self._buy_point
+        width, height = self._adb_size()
+        return (int(width * 0.65), height - BUY_BAR_TAP_OFFSET)
+
+    def _tap_buy_now(self):
+        """普通模式：退回详情页后只做一次 adb 点击。"""
+        self._ensure_detail_page()
+        point = self._buy_bar_point()
         self._adb_tap(*point)
         print(f"已点击底栏坐标 {point}")
 
@@ -478,17 +501,113 @@ class DamaiBot:
     def _wait_for_sale(self):
         return wait_for_sale_time(self.config.sell_start_time)
 
+    # ---------- 开抢前：按钮翻转感知 ----------
+    FLIP_KEYWORDS = ("立即预订", "立即购票", "立即购买")
+    # 开抢前多少秒开始 OCR 轮询底栏文案
+    FLIP_WATCH_FROM = 30.0
+    # 每轮 OCR 之间的间隔（一轮约 1.8 秒：截图 + 识别）
+    FLIP_POLL_INTERVAL = 0.2
+    # 连续多少轮识别失败就放弃感知，退回纯定时
+    FLIP_MAX_FAILURES = 3
+
+    def _flip_detected(self, rows, height):
+        """底栏区域（屏幕下 20%）出现可购买文案即认为按钮已翻转。"""
+        return any(
+            y > height * 0.8 and any(keyword in text for keyword in self.FLIP_KEYWORDS)
+            for _x, y, _c, text in rows
+        )
+
+    def _wait_for_sale_with_flip_watch(self):
+        """极速模式等待开售：提前 OCR 感知按钮翻转。
+
+        开抢前 30 秒起轮询截图 OCR：一旦底栏出现「立即预订/立即购票」
+        立即放行（大麦提前放票也能赶上，delay_ms 为负表示提前量）；
+        到点未感知到则交回精准定时放行，由底栏重试逻辑兜底。
+        """
+        target = parse_sale_time(self.config.sell_start_time)
+        try:
+            warm_rows = self._ocr()
+            print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
+        except Exception as exc:
+            print(f"OCR 预热失败（{exc}），跳过按钮翻转感知，改纯定时")
+            return self._wait_for_sale()
+        width, height = self._adb_size()
+        remaining = (target - datetime.now(SHANGHAI)).total_seconds()
+        if remaining > self.FLIP_WATCH_FROM:
+            time.sleep(remaining - self.FLIP_WATCH_FROM)
+        failures = 0
+        while True:
+            remaining = (target - datetime.now(SHANGHAI)).total_seconds()
+            if remaining <= 0.3:
+                print("到点未感知到按钮翻转，按精准定时放行（底栏重试兜底）")
+                return self._wait_for_sale()
+            try:
+                rows = self._ocr()
+                failures = 0
+            except Exception as exc:
+                failures += 1
+                print(f"翻转感知第 {failures} 轮识别失败：{exc}")
+                if failures >= self.FLIP_MAX_FAILURES:
+                    print("识别连续失败，放弃感知，改纯定时")
+                    return self._wait_for_sale()
+                time.sleep(self.FLIP_POLL_INTERVAL)
+                continue
+            if self._flip_detected(rows, height):
+                released_at = datetime.now(SHANGHAI)
+                print(
+                    f"感知到底栏已变为可购买状态，"
+                    f"提前 {remaining:.1f} 秒放行"
+                )
+                return SaleRelease(
+                    target_time=target,
+                    released_at=released_at,
+                    target_monotonic=time.monotonic() + max(remaining, 0.0),
+                    released_monotonic=time.monotonic(),
+                )
+            time.sleep(self.FLIP_POLL_INTERVAL)
+
+    def _tap_buy_bar_until_next_page(self, point):
+        """到点直点底栏直到离开详情页。
+
+        覆盖两种现实情况：大麦按钮延迟翻转（间隔重试），以及点到“已预约”
+        被带去别的页面（先退回详情页再点）。返回翻页后的 Activity 名。
+        """
+        deadline = time.perf_counter() + BUY_RETRY_TIMEOUT
+        attempts = 0
+        while time.perf_counter() < deadline:
+            attempts += 1
+            self._adb_tap(*point)
+            if attempts == 1:
+                print(f"已点击底栏坐标 {point}")
+                self._mark("点击底栏完成")
+            else:
+                print(f"底栏未翻页，第 {attempts} 次点击")
+            wait_until = time.perf_counter() + (
+                BUY_FIRST_WAIT if attempts == 1 else BUY_RETRY_WAIT
+            )
+            while time.perf_counter() < wait_until:
+                activity = self._foreground_activity()
+                if "NcovSkuActivity" in activity or "DmOrderActivity" in activity:
+                    if attempts > 1:
+                        print(f"底栏点击 {attempts} 次后翻页")
+                    return activity
+                if "ProjectDetailActivity" not in activity:
+                    print(f"前台是 {activity or '未知'}，先返回详情页")
+                    self._adb("input", "keyevent", "4")
+                    time.sleep(0.4)
+                    break
+                time.sleep(0.05)
+        raise TimeoutError(
+            f"点击底栏 {attempts} 次仍未进入下单流程"
+            "（大麦按钮可能延迟翻转，或场次已售罄）"
+        )
+
     def _run_fast(self):
         """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
         print("极速模式：按坐标直点（不 dump、不 OCR）")
-        self._tap_buy_now()
-        self._mark("点击底栏完成")
-        marker = self._wait_any_activity(
-            ("NcovSkuActivity", "DmOrderActivity"), time.perf_counter() + 3.0
-        )
-        if not marker:
-            raise TimeoutError("点击底栏后没有离开详情页")
-        if marker == "NcovSkuActivity":
+        self._ensure_detail_page()
+        marker = self._tap_buy_bar_until_next_page(self._buy_bar_point())
+        if "NcovSkuActivity" in marker:
             time.sleep(0.45)
             point = self._resolve_point(self.config.confirm_point, CONFIRM_POINT_RATIO)
             self._adb_tap(*point)
@@ -526,7 +645,10 @@ class DamaiBot:
                 return False
             print(f"等待程序定时开抢：{self.config.sell_start_time}")
             self._prepare_buy_point()
-            release = self._wait_for_sale()
+            if self.config.fast_mode:
+                release = self._wait_for_sale_with_flip_watch()
+            else:
+                release = self._wait_for_sale()
             print(
                 f"定时放行：{release.released_at.isoformat()}；"
                 f"调度偏差：{release.delay_ms:.3f} 毫秒"
