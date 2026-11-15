@@ -275,6 +275,28 @@ async function refreshAndroidDevices() {
 $("#android-device-name").addEventListener("change", (event) => selectAndroidDevice(event.target.value.trim()));
 $("#android-refresh-devices").addEventListener("click", refreshAndroidDevices);
 
+async function calibrateAndroidPoint() {
+  const button = $("#android-calibrate");
+  const hint = $("#android-calibrate-hint");
+  const defaultHint = hint.textContent;
+  button.disabled = true;
+  button.textContent = "识别中…";
+  hint.textContent = "正在截图识别当前页面按钮…（首次约 5 秒，为 OCR 预热）";
+  try {
+    const result = await api("/api/android/calibrate", { method: "POST" });
+    fillAndroidConfig(result.config);
+    hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。`;
+    toast(`已采集「${result.button}」坐标 ${result.point}`);
+  } catch (error) {
+    hint.textContent = `${error.message}（${defaultHint}）`;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "采集当前页按钮坐标";
+  }
+}
+$("#android-calibrate").addEventListener("click", calibrateAndroidPoint);
+
 $("#config-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {

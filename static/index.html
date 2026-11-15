@@ -113,6 +113,8 @@
             <label class="field"><span>「确定」坐标</span><input id="android-confirm-point" type="text" placeholder="例如 843,2315" autocomplete="off"></label>
             <label class="field"><span>「立即提交」坐标</span><input id="android-submit-point" type="text" placeholder="例如 788,2319" autocomplete="off"></label>
           </div>
+          <button id="android-calibrate" class="button button-outline" type="button">采集当前页按钮坐标</button>
+          <p id="android-calibrate-hint" class="field-hint">把大麦依次停在详情页 → 选票档页 → 确认页，每页点一次本按钮，即可自动识别按钮位置并写入上方坐标（顺带完成 OCR 预热）。</p>
         </details>
 
         <div class="form-footer">
