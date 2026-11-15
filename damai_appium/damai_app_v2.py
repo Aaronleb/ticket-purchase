@@ -13,6 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 try:
     from .config import Config
@@ -94,9 +95,28 @@ class DamaiBot:
         self._started_at = None
         # 开售前 dump 一次底栏位置并缓存，放行瞬间只剩 1 次 adb tap
         self._buy_point = None
+        # 渲染稳定检测器在开抢前创建好（u2 探活约 0.9s，不能放进关键路径）
+        self._stable_wait = None
+        # 常驻 adb shell 会话：None=未尝试，False=不可用，对象=可用
+        self._adb_session = None
 
     # ---------- 底层：adb ----------
     def _adb(self, *args, timeout=10):
+        # 优先走常驻 shell 会话（省每次 34ms 进程创建）；失败退回单次调用
+        if self._adb_session is None:
+            try:
+                from adb_session import AdbShellSession
+
+                self._adb_session = AdbShellSession(self.config.device_name)
+            except Exception:
+                self._adb_session = False
+        if self._adb_session:
+            try:
+                stdout = self._adb_session.run(args, timeout=timeout)
+                return SimpleNamespace(stdout=stdout, returncode=0)
+            except Exception as exc:
+                print(f"常驻 adb 会话失败（{exc}），退回单次调用")
+                self._adb_session = False
         return subprocess.run(
             ["adb", "-s", self.config.device_name, *args],
             capture_output=True, text=True, timeout=timeout,
@@ -185,7 +205,7 @@ class DamaiBot:
             for marker in markers:
                 if marker in activity:
                     return marker
-            time.sleep(0.05)
+            time.sleep(0.02)
         return ""
 
     def _wait_activity_gone(self, marker, deadline):
@@ -656,7 +676,7 @@ class DamaiBot:
                     self._adb("input", "keyevent", "4")
                     time.sleep(0.4)
                     break
-                time.sleep(0.05)
+                time.sleep(0.02)
         raise TimeoutError(
             f"点击底栏 {attempts} 次仍未进入下单流程"
             "（大麦按钮可能延迟翻转，或场次已售罄）"
@@ -691,7 +711,7 @@ class DamaiBot:
         """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
         print("极速模式：按坐标直点（不 dump、不 OCR）")
         self._ensure_detail_page()
-        stable_wait = self._make_stable_waiter()
+        stable_wait = self._stable_wait or self._make_stable_waiter()
         marker = self._tap_buy_bar_until_next_page(self._buy_bar_point())
         if "NcovSkuActivity" in marker:
             self._wait_page_ready(stable_wait, "票档页")
@@ -734,6 +754,8 @@ class DamaiBot:
             self._prepare_buy_point()
             self._align_clock_with_phone()
             if self.config.fast_mode:
+                # 就绪检测器提前建好：u2 连接探活约 0.9s，开售瞬间直接用
+                self._stable_wait = self._make_stable_waiter()
                 release = self._wait_for_sale_with_flip_watch()
             else:
                 release = self._wait_for_sale()
