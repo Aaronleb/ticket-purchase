@@ -12,13 +12,7 @@ import sys
 from rapidocr_onnxruntime import RapidOCR
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("用法：damai_ocr <图片路径>", file=sys.stderr)
-        return 2
-    result, _elapse = RapidOCR()(sys.argv[1])
-    if not result:
-        return 0
+def _iter_result_lines(result):
     for box, text, score in result:
         xs = [point[0] for point in box]
         ys = [point[1] for point in box]
@@ -26,7 +20,45 @@ def main() -> int:
         cy = int(sum(ys) / len(ys))
         text = " ".join(str(text).split())
         if text:
-            print(f"{cx}\t{cy}\t{float(score):.3f}\t{text}")
+            yield f"{cx}\t{cy}\t{float(score):.3f}\t{text}"
+
+
+def daemon() -> int:
+    """常驻模式：从 stdin 逐行读图片路径，识别完输出结果 + ===END===。
+
+    免去每次调用的 Python 启动和模型加载开销（单次要 ~600ms），
+    常驻后单张底栏裁剪图识别约 100~200ms。
+    """
+    engine = RapidOCR()
+    print("READY", flush=True)
+    for line in sys.stdin:
+        path = line.strip()
+        if not path:
+            continue
+        try:
+            result, _elapse = engine(path)
+        except Exception as exc:
+            print(f"ERROR\t{exc}", flush=True)
+            print("===END===", flush=True)
+            continue
+        if result:
+            for line_out in _iter_result_lines(result):
+                print(line_out, flush=True)
+        print("===END===", flush=True)
+    return 0
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("用法：damai_ocr <图片路径> | damai_ocr --daemon", file=sys.stderr)
+        return 2
+    if sys.argv[1] == "--daemon":
+        return daemon()
+    result, _elapse = RapidOCR()(sys.argv[1])
+    if not result:
+        return 0
+    for line_out in _iter_result_lines(result):
+        print(line_out)
     return 0
 
 

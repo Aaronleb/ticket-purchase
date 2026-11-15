@@ -556,20 +556,21 @@ class DamaiBot:
     def _wait_for_sale_with_flip_watch(self):
         """极速模式等待开售：提前 OCR 感知按钮翻转。
 
-        开抢前 30 秒起轮询截图 OCR：一旦底栏出现「立即预订/立即购票」
+        开抢前 30 秒起轮询底栏：一旦底栏出现「立即预订/立即购票」
         立即放行（大麦提前放票也能赶上，delay_ms 为负表示提前量）；
         到点未感知到则交回精准定时放行，由底栏重试逻辑兜底。
+        优先 u2 截图+底栏裁剪 OCR（一轮约 0.5 秒），agent 不可用
+        退回全屏 adb 截图 OCR（一轮约 1.8 秒）。
         """
         target = parse_sale_time(self.config.sell_start_time)
         try:
             warm_rows = self._ocr()
             print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
         except Exception as exc:
-            print(f"OCR 预热失败（{exc}），按钮翻转感知将只靠 u2 事件监听")
+            print(f"OCR 预热失败（{exc}），按钮翻转感知将只靠 u2 截图监听")
         remaining = (target - datetime.now(SHANGHAI)).total_seconds()
         if remaining > self.FLIP_WATCH_FROM:
             time.sleep(remaining - self.FLIP_WATCH_FROM)
-        # 优先 u2 事件监听（设备端等待，百毫秒级）；agent 不可用退回 OCR 轮询
         watch = None
         watch_name = "OCR 轮询"
         try:
@@ -577,7 +578,7 @@ class DamaiBot:
 
             watch_name, watch = make_flip_watcher(self.config.device_name)
         except Exception as exc:
-            print(f"u2 事件监听不可用（{exc}），退回 OCR 轮询感知")
+            print(f"u2 截图监听不可用（{exc}），退回 OCR 轮询感知")
         if watch is None and self._ocr is None:
             print("无可用感知手段，改纯定时")
             return self._wait_for_sale()
@@ -661,13 +662,39 @@ class DamaiBot:
             "（大麦按钮可能延迟翻转，或场次已售罄）"
         )
 
+    def _make_stable_waiter(self):
+        """构建底栏渲染稳定检测；不可用返回 None（退回固定余量）。"""
+        try:
+            from flip_watch import make_strip_stable_waiter
+
+            name, wait = make_strip_stable_waiter(self.config.device_name)
+            print(f"页面就绪检测：{name}")
+            return wait
+        except Exception as exc:
+            print(f"页面就绪检测不可用（{exc}），退回固定等待")
+            return None
+
+    def _wait_page_ready(self, stable_wait, label):
+        """等页面底栏渲染稳定再盲点坐标；检测不可用时退回固定余量。"""
+        if stable_wait is not None:
+            try:
+                if stable_wait(1.2):
+                    print(f"{label}渲染已稳定，开始点击")
+                    return
+                print(f"{label}稳定检测超时，按固定余量继续点击")
+            except Exception as exc:
+                print(f"{label}稳定检测异常（{exc}），按固定余量继续点击")
+        time.sleep(0.15)
+
     def _run_fast(self):
+        """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
         """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
         print("极速模式：按坐标直点（不 dump、不 OCR）")
         self._ensure_detail_page()
+        stable_wait = self._make_stable_waiter()
         marker = self._tap_buy_bar_until_next_page(self._buy_bar_point())
         if "NcovSkuActivity" in marker:
-            time.sleep(0.45)
+            self._wait_page_ready(stable_wait, "票档页")
             point = self._resolve_point(self.config.confirm_point, CONFIRM_POINT_RATIO)
             self._adb_tap(*point)
             print(f"点击“确定” {point}")
@@ -683,14 +710,15 @@ class DamaiBot:
         if not self.config.if_commit_order:
             print("已到确认页（极速模式不读页面）；自动提交已关闭")
             return True
-        time.sleep(0.6)
+        self._wait_page_ready(stable_wait, "确认页")
         submit = self._resolve_point(self.config.submit_point, SUBMIT_POINT_RATIO)
         for attempt in range(2):
             self._submit_attempted = True
             self._adb_tap(*submit)
             print(f"点击“立即提交”（第 {attempt + 1} 次）{submit}")
             self._mark("点击立即提交")
-            if self._wait_activity_gone("DmOrderActivity", time.perf_counter() + 2.0):
+            # 0.8 秒内活动页没离开就立即补点，把最坏情况从 2.6s 压到 ~1.2s
+            if self._wait_activity_gone("DmOrderActivity", time.perf_counter() + 0.8):
                 break
         print(f"提交完成，全链路耗时：{time.perf_counter() - self._started_at:.2f} 秒")
         self._report_screen("提交后")

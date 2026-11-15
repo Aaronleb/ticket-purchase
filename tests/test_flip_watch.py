@@ -12,10 +12,11 @@ from unittest.mock import Mock
 import pytest
 
 import damai_appium.damai_app_v2 as app_v2
+import flip_watch
 from damai_appium.damai_app_v2 import DamaiBot
 from damai_appium.sale_clock import SHANGHAI
 
-from flip_watch import FLIP_KEYWORDS, FlipWatchError, _hit_bottom_bar
+from flip_watch import FLIP_KEYWORDS, FlipWatchError
 
 
 TARGET = datetime(2026, 11, 16, 17, 16, 18, tzinfo=SHANGHAI)
@@ -57,11 +58,73 @@ def frozen(mocker):
     return fake_time
 
 
-def test_hit_bottom_bar():
-    assert _hit_bottom_bar({"top": 2600}, 2712) is True
-    assert _hit_bottom_bar({"top": 1000}, 2712) is False
-    assert _hit_bottom_bar({}, 0) is True  # 拿不到屏幕高度不过滤
-    assert set(FLIP_KEYWORDS) >= {"立即预订", "立即购票"}
+def test_oneshot_texts_parses_tool_output(mocker):
+    from flip_watch import _DEFAULT_OCR_TOOL, _oneshot_texts
+
+    done = mocker.patch("flip_watch.subprocess.run")
+    done.return_value.stdout = "10\t20\t0.98\t立即预订\n30\t40\t0.90\t已预约\n坏行\n"
+    assert _oneshot_texts("/tmp/x.png", _DEFAULT_OCR_TOOL) == ["立即预订", "已预约"]
+
+    fail = mocker.patch("flip_watch.subprocess.run")
+    fail.side_effect = OSError("工具不存在")
+    assert _oneshot_texts("/tmp/x.png", _DEFAULT_OCR_TOOL) == []
+
+
+def test_daemon_ocr_falls_back_to_oneshot(mocker):
+    """daemon 起不来时退回一次性调用，仍返回识别文本。"""
+    from flip_watch import _DEFAULT_OCR_TOOL, _DaemonOcr
+
+    mocker.patch.object(flip_watch, "_spawn_daemon", return_value=None)
+    done = mocker.patch("flip_watch.subprocess.run")
+    done.return_value.stdout = "10\t20\t0.98\t立即预订\n"
+    try:
+        assert _DaemonOcr.texts("/tmp/x.png", _DEFAULT_OCR_TOOL) == ["立即预订"]
+    finally:
+        _DaemonOcr._proc = None
+
+
+def test_strip_stable_waiter_detects_stable(mocker):
+    """伪造 u2：底栏画面变化后稳定，wait 应返回 True。"""
+    from PIL import Image
+
+    fake_u2 = mocker.MagicMock()
+    shots = [
+        Image.new("RGB", (1220, 2712), (10, 10, 10)),
+        Image.new("RGB", (1220, 2712), (10, 10, 10)),
+        Image.new("RGB", (1220, 2712), (80, 80, 80)),  # 渲染突变
+        Image.new("RGB", (1220, 2712), (80, 80, 80)),
+        Image.new("RGB", (1220, 2712), (80, 80, 80)),
+    ]
+    fake_u2.connect.return_value.screenshot.side_effect = shots
+    mocker.patch.dict("sys.modules", {"uiautomator2": fake_u2})
+
+    name, wait = flip_watch.make_strip_stable_waiter("fake-device")
+    assert "稳定检测" in name
+    assert wait(5.0) is True
+    # 变化后需要连续 2 轮稳定：第 3 张是新画面，第 4、5 张稳定才放行
+    assert fake_u2.connect.return_value.screenshot.call_count == 5
+
+
+def test_strip_stable_waiter_timeout_returns_false(mocker):
+    """画面一直变化时超时返回 False。"""
+    from PIL import Image
+
+    counter = {"n": 0}
+
+    def jitter(_size):
+        counter["n"] += 17
+        return Image.new("RGB", (1220, 2712), (counter["n"] % 255,) * 3)
+
+    fake_u2 = mocker.MagicMock()
+    fake_u2.connect.return_value.screenshot.side_effect = lambda: jitter(None)
+    mocker.patch.dict("sys.modules", {"uiautomator2": fake_u2})
+
+    _, wait = flip_watch.make_strip_stable_waiter("fake-device")
+    assert wait(0.8) is False
+
+
+def test_flip_keywords_cover_buyable_texts():
+    assert set(FLIP_KEYWORDS) >= {"立即预订", "立即购票", "立即购买"}
 
 
 def test_u2_watch_flips_early_releases(frozen):
