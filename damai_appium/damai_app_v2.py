@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -241,7 +242,7 @@ class DamaiBot:
         """返回 [(x, y, 置信度, 文本)]；失败时返回空列表。"""
         try:
             result = subprocess.run(
-                [str(OCR_TOOL), self._screenshot()],
+                [sys.executable, str(OCR_TOOL), self._screenshot()],
                 capture_output=True, text=True, timeout=60,
             )
         except (OSError, subprocess.SubprocessError) as exc:
