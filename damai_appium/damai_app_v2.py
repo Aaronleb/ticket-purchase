@@ -479,7 +479,7 @@ class DamaiBot:
         return wait_for_sale_time(self.config.sell_start_time)
 
     def _run_fast(self):
-        """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面。"""
+        """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
         print("极速模式：按坐标直点（不 dump、不 OCR）")
         self._tap_buy_now()
         self._mark("点击底栏完成")
@@ -496,16 +496,10 @@ class DamaiBot:
             self._mark("点击确定")
             marker = self._wait_any_activity(("DmOrderActivity",), time.perf_counter() + 3.0)
             if not marker:
-                print("“确定”没生效（票档可能没预选），回退到 OCR 选票档")
-                rows = self._ocr()
-                if self._on_sku_page(self._ocr_texts(rows)):
-                    if self.config.auto_select:
-                        self._choose_price(rows)
-                        time.sleep(0.4)
-                    self._tap_sku_confirm(rows)
-                    marker = self._wait_any_activity(
-                        ("DmOrderActivity",), time.perf_counter() + 4.0
-                    )
+                raise RuntimeError(
+                    "“确定”点击后 3 秒仍未进入确认页：请确认大麦预约已预选场次/票档/观演人，"
+                    "或核对「确定」坐标配置；极速模式不做 OCR 兜底，直接结束"
+                )
         if marker != "DmOrderActivity":
             raise TimeoutError("没有进入订单确认页")
         if not self.config.if_commit_order:
