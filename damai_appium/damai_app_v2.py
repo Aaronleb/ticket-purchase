@@ -16,6 +16,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+# 项目根目录的 flip_watch / time_sync / adb_session 需要可导入；
+# 控制台启动 worker 时 cwd 是 damai_appium，默认不在 sys.path。
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 try:
     from .config import Config
     from .sale_clock import (
