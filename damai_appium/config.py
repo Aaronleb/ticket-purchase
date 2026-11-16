@@ -20,6 +20,7 @@ class Config:
         confirm_point="",
         submit_point="",
         buy_point="",
+        flip_template_dir="",
     ):
         self.server_url = server_url
         self.if_commit_order = if_commit_order
@@ -32,12 +33,12 @@ class Config:
         self.auto_select = auto_select
         # 观演人姓名：自动勾选时按它匹配
         self.users = [u for u in (users or []) if isinstance(u, str) and u.strip()]
-        # 极速模式：开售瞬间只按坐标点“确定”和“立即提交”，不做 OCR/dump
         self.keyword = (keyword or "").strip()
         self.fast_mode = fast_mode
         self.confirm_point = (confirm_point or "").strip()
         self.submit_point = (submit_point or "").strip()
         self.buy_point = (buy_point or "").strip()
+        self.flip_template_dir = (flip_template_dir or "").strip()
 
     @staticmethod
     def load_config():
@@ -58,4 +59,5 @@ class Config:
             config.get("confirm_point", ""),
             config.get("submit_point", ""),
             config.get("buy_point", ""),
+            config.get("flip_template_dir", ""),
         )

@@ -232,16 +232,6 @@ class DamaiBot:
         width, height = self._adb_size()
         return int(width * ratio[0]), int(height * ratio[1])
 
-    def _report_screen(self, label):
-        """提交后取一张图 OCR 一下，只作记录，不影响速度。"""
-        try:
-            self._screenshot("/tmp/damai_after.png")
-            rows = self._ocr()
-            texts = [text for _x, _y, _c, text in rows][:8]
-            print(f"{label}：{' / '.join(texts)}")
-        except Exception as exc:
-            print(f"{label}：截图识别失败（{exc}）")
-
     def _wait_activity(self, marker, deadline):
         while time.perf_counter() < deadline:
             if marker in self._foreground_activity():
@@ -565,100 +555,60 @@ class DamaiBot:
         )
 
     # ---------- 开抢前：按钮翻转感知 ----------
-    FLIP_KEYWORDS = ("立即预订", "立即购票", "立即购买")
-    # 开抢前多少秒开始 OCR 轮询底栏文案
     FLIP_WATCH_FROM = 30.0
-    # 每轮 OCR 之间的间隔（一轮约 1.8 秒：截图 + 识别）
-    FLIP_POLL_INTERVAL = 0.2
-    # 连续多少轮识别失败就放弃感知，退回纯定时
-    FLIP_MAX_FAILURES = 3
-
-    def _flip_detected(self, rows, height):
-        """底栏区域（屏幕下 20%）出现可购买文案即认为按钮已翻转。"""
-        return any(
-            y > height * 0.8 and any(keyword in text for keyword in self.FLIP_KEYWORDS)
-            for _x, y, _c, text in rows
-        )
+    # 到点仍未匹配到正面模板时继续感知；超时停止，禁止 OCR 或纯定时盲点
+    FLIP_POST_SALE_TIMEOUT = 15.0
 
     def _wait_for_sale_with_flip_watch(self):
-        """极速模式等待开售：提前 OCR 感知按钮翻转。
-
-        开抢前 30 秒起轮询底栏：一旦底栏出现「立即预订/立即购票」
-        立即放行（大麦提前放票也能赶上，delay_ms 为负表示提前量）；
-        到点未感知到则交回精准定时放行，由底栏重试逻辑兜底。
-        优先 u2 截图+底栏裁剪 OCR（一轮约 0.5 秒），agent 不可用
-        退回全屏 adb 截图 OCR（一轮约 1.8 秒）。
-        """
+        """仅在 Scrcpy 画面正面匹配到可购买按钮模板时放行。"""
         target = parse_sale_time(self.config.sell_start_time)
-        try:
-            warm_rows = self._ocr()
-            print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
-        except Exception as exc:
-            print(f"OCR 预热失败（{exc}），按钮翻转感知将只靠 u2 截图监听")
         remaining = (target - datetime.now(SHANGHAI)).total_seconds()
+        if remaining <= 0:
+            raise SaleTimeError("抢购时间已过，未执行购买")
         if remaining > self.FLIP_WATCH_FROM:
             time.sleep(remaining - self.FLIP_WATCH_FROM)
-        watch = None
-        watch_name = "OCR 轮询"
-        try:
-            from flip_watch import make_flip_watcher
 
-            watch_name, watch = make_flip_watcher(self.config.device_name)
-        except Exception as exc:
-            print(f"u2 截图监听不可用（{exc}），退回 OCR 轮询感知")
-        if watch is None and self._ocr is None:
-            print("无可用感知手段，改纯定时")
-            return self._wait_for_sale()
-        print(f"按钮翻转感知：{watch_name}")
         width, height = self._adb_size()
-        failures = 0
-        while True:
-            remaining = (target - datetime.now(SHANGHAI)).total_seconds()
-            if remaining <= 0.3:
-                print("到点未感知到按钮翻转，按精准定时放行（底栏重试兜底）")
-                return self._wait_for_sale()
-            if watch is not None:
-                try:
-                    flipped = watch(remaining - 0.3)
-                    failures = 0
-                except Exception as exc:
-                    flipped = False
-                    failures += 1
-                    print(f"翻转感知第 {failures} 轮异常：{exc}")
-                    if failures >= self.FLIP_MAX_FAILURES:
-                        print("感知连续异常，放弃感知，改纯定时")
-                        return self._wait_for_sale()
-            else:
-                try:
-                    rows = self._ocr()
-                    failures = 0
-                    flipped = self._flip_detected(rows, height)
-                except Exception as exc:
-                    flipped = False
-                    failures += 1
-                    print(f"翻转感知第 {failures} 轮识别失败：{exc}")
-                    if failures >= self.FLIP_MAX_FAILURES:
-                        print("识别连续失败，放弃感知，改纯定时")
-                        return self._wait_for_sale()
-            if flipped:
-                released_at = datetime.now(SHANGHAI)
-                print(
-                    f"感知到底栏已变为可购买状态，"
-                    f"提前 {remaining:.1f} 秒放行"
-                )
-                time.sleep(0.15)
-                return SaleRelease(
-                    target_time=target,
-                    released_at=released_at,
-                    target_monotonic=time.monotonic() + max(remaining, 0.0),
-                    released_monotonic=time.monotonic(),
-                )
+        try:
+            from flip_watch import make_scrcpy_watcher
+
+            watch_name, watch = make_scrcpy_watcher(
+                self.config.device_name,
+                focus_point=self._buy_point,
+                screen_size=(width, height),
+                template_dir=getattr(self.config, "flip_template_dir", "") or None,
+            )
+        except Exception as exc:
+            raise SaleTimeError(f"Scrcpy 模板感知不可用：{exc}；未点击") from exc
+
+        print(f"按钮翻转感知：{watch_name}")
+        remaining = (target - datetime.now(SHANGHAI)).total_seconds()
+        try:
+            flipped = watch(max(remaining, 0.0) + self.FLIP_POST_SALE_TIMEOUT)
+        except Exception as exc:
+            raise SaleTimeError(f"按钮模板感知异常：{exc}；未点击") from exc
+        if not flipped:
+            raise SaleTimeError("等待可购买按钮模板超时，已停止且未点击")
+
+        released_at = datetime.now(SHANGHAI)
+        released_monotonic = time.monotonic()
+        remaining = (target - released_at).total_seconds()
+        if remaining >= 0:
+            print(f"感知到底栏已变为可购买状态，提前 {remaining:.3f} 秒放行")
+        else:
+            print(f"感知到底栏已变为可购买状态，开售后 {-remaining:.3f} 秒放行")
+        return SaleRelease(
+            target_time=target,
+            released_at=released_at,
+            target_monotonic=released_monotonic + remaining,
+            released_monotonic=released_monotonic,
+        )
 
     def _tap_buy_bar_until_next_page(self, point):
-        """到点直点底栏直到离开详情页。
+        """正面确认可购买后点击底栏，直到离开详情页。
 
-        覆盖两种现实情况：大麦按钮延迟翻转（间隔重试），以及点到“已预约”
-        被带去别的页面（先退回详情页再点）。返回翻页后的 Activity 名。
+        重试覆盖点击后页面未响应；若仍误入“已预约”等页面，先退回详情页。
+        返回翻页后的 Activity 名。
         """
         deadline = time.perf_counter() + BUY_RETRY_TIMEOUT
         attempts = 0
@@ -761,7 +711,6 @@ class DamaiBot:
             if self._wait_activity_gone("DmOrderActivity", time.perf_counter() + 0.8):
                 break
         print(f"提交完成，全链路耗时：{time.perf_counter() - self._started_at:.2f} 秒")
-        self._report_screen("提交后")
         return True
 
     def run_ticket_grabbing(self):

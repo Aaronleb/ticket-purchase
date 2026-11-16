@@ -103,8 +103,13 @@ class WebApplication:
     def calibrate_android(self):
         """识别手机当前页面，把对应按钮坐标写回配置。"""
         config = self.android_store.load()
-        result = calibrate_android_point(config.get("device_name", ""))
+        template_dir = self.android_store.config_path.parent / "flip-templates"
+        result = calibrate_android_point(
+            config.get("device_name", ""), template_dir=template_dir
+        )
         config[result["field"]] = result["point"]
+        if result.get("template_path"):
+            config["flip_template_dir"] = str(template_dir)
         result["config"] = self.android_store.save(config)
         return result
 

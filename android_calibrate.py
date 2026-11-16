@@ -1,22 +1,20 @@
 # -*- coding: UTF-8 -*-
-"""开抢前采集按钮坐标。
+"""开抢前采集按钮坐标和可购买按钮正面模板。
 
 识别手机当前停在哪个页面（详情页 / 选票档页 / 确认页），截图 OCR 找到
-对应按钮文字的实测中心点，写回配置对应字段。三个页面各点一次，
-即可在开抢前完成坐标核对与预热（首次 OCR 会建立模型缓存，约 5 秒）。
+对应按钮文字的实测中心点，写回配置对应字段。详情页只有正面识别到可购买
+文案才保存无 OCR 模板；通过容器坐标兜底时不会把“已预约”保存为放行模板。
 """
 from __future__ import annotations
 
 import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 from config_store import ConfigError
 
 
-OCR_TOOL = Path(__file__).resolve().parent / "tools" / "damai_ocr"
 # 详情页底栏容器：OCR 找不到按钮文字时的后备定位手段
 BUY_BAR_CONTAINER_ID = "cn.damai:id/trade_project_detail_purchase_status_bar_container_fl"
 
@@ -43,26 +41,29 @@ def _foreground_activity(device: str) -> str:
     return match.group(1) if match else ""
 
 
+_OCR_ENGINE = None
+
+
 def _ocr_rows(image_path: str) -> list[tuple[int, int, str]]:
-    """返回 [(x, y, 文本)]；工具缺失或失败返回空列表。"""
+    """校准专用应用内 OCR，返回 [(x, y, 文本)]。"""
+    global _OCR_ENGINE
     try:
-        result = subprocess.run(
-            [sys.executable, str(OCR_TOOL), image_path],
-            capture_output=True,
-            text=True,
-            timeout=90,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ConfigError(f"OCR 工具不可用：{exc}") from exc
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as exc:
+        raise ConfigError(f"校准 OCR 组件不可用：{exc}") from exc
+    if _OCR_ENGINE is None:
+        _OCR_ENGINE = RapidOCR()
+    try:
+        result, _elapsed = _OCR_ENGINE(image_path)
+    except Exception as exc:
+        raise ConfigError(f"校准截图识别失败：{exc}") from exc
     rows = []
-    for line in result.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) != 4:
-            continue
-        try:
-            rows.append((int(parts[0]), int(parts[1]), parts[3].strip()))
-        except ValueError:
-            continue
+    for box, text, _score in result or []:
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+        normalized = " ".join(str(text).split())
+        if normalized:
+            rows.append((int(sum(xs) / len(xs)), int(sum(ys) / len(ys)), normalized))
     return rows
 
 
@@ -90,7 +91,28 @@ def _dump_buy_bar_center(device: str) -> tuple[int, int] | None:
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
-def calibrate_android_point(device: str) -> dict:
+def _save_buy_template(image_path: str, point, template_dir) -> str:
+    from PIL import Image
+
+    directory = Path(template_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    image = Image.open(image_path).convert("L")
+    half_width = int(image.width * 0.18)
+    half_height = int(image.height * 0.035)
+    crop = image.crop(
+        (
+            max(0, point[0] - half_width),
+            max(0, point[1] - half_height),
+            min(image.width, point[0] + half_width),
+            min(image.height, point[1] + half_height),
+        )
+    )
+    destination = directory / "buy.png"
+    crop.save(destination, format="PNG")
+    return str(destination)
+
+
+def calibrate_android_point(device: str, template_dir=None) -> dict:
     """识别当前页面并采集对应按钮坐标，返回结果 dict（不含写配置）。"""
     if not device:
         raise ConfigError("请先在配置里选择并保存设备名")
@@ -114,7 +136,9 @@ def calibrate_android_point(device: str) -> dict:
     if capture.returncode != 0:
         raise ConfigError("截图失败，请确认手机亮屏且 USB 调试正常")
 
-    point = _find_button(_ocr_rows(image_path), keywords)
+    rows = _ocr_rows(image_path)
+    point = _find_button(rows, keywords)
+    text_confirmed = point is not None
     if point is None and field == "buy_point":
         point = _dump_buy_bar_center(device)
     if point is None:
@@ -122,10 +146,13 @@ def calibrate_android_point(device: str) -> dict:
             f"在{page_name}上没有识别到「{button_name}」按钮，"
             "请确认页面已完全加载后重试"
         )
-    return {
+    result = {
         "field": field,
         "page": page_name,
         "button": button_name,
         "point": f"{point[0]},{point[1]}",
         "activity": activity,
     }
+    if field == "buy_point" and text_confirmed and template_dir:
+        result["template_path"] = _save_buy_template(image_path, point, template_dir)
+    return result

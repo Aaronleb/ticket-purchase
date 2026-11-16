@@ -10,6 +10,10 @@
 - PyInstaller：GPLv2 或更高版本及 Bootloader 分发例外。
 - pywebview：BSD 3-Clause License，完整条款见下方。
 - PyObjC、Bottle 与 proxy_tools：MIT License。
+- Scrcpy server 2.4：Apache License 2.0，官方发布文件及许可证随应用附带。
+- PyAV：BSD 3-Clause License；随包 FFmpeg 动态库遵循其 LGPL 许可，版权与许可证由 PyAV wheel 附带。
+- OpenCV：Apache License 2.0。
+- RapidOCR / ONNX Runtime：Apache License 2.0 / MIT License。
 
 组件来源：
 
@@ -23,6 +27,12 @@
 - https://github.com/ronaldoussoren/pyobjc
 - https://bottlepy.org/
 - https://github.com/jtushman/proxy_tools
+- https://github.com/Genymobile/scrcpy/releases/tag/v2.4
+- https://github.com/PyAV-Org/PyAV
+- https://ffmpeg.org/legal.html
+- https://opencv.org/
+- https://github.com/RapidAI/RapidOCR
+- https://onnxruntime.ai/
 
 ## pywebview BSD 3-Clause License
 

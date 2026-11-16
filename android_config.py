@@ -30,6 +30,8 @@ DEFAULT_ANDROID_CONFIG = {
     "submit_point": "",
     # 详情页底栏「立即购票」：留空则开售前自动 dump 定位，失败按比例兜底
     "buy_point": "",
+    # 校准可购买详情页后保存正面模板目录，由应用内部维护
+    "flip_template_dir": "",
 }
 
 
@@ -62,7 +64,7 @@ def validate_android_config(payload) -> dict:
     config["server_url"] = server_url
     config["device_name"] = _required_string(config["device_name"], "设备名")
     config["platform_version"] = _required_string(config["platform_version"], "Android 版本")
-    for field in ("keyword", "city", "date", "price"):
+    for field in ("keyword", "city", "date", "price", "flip_template_dir"):
         config[field] = _optional_string(config[field], field)
 
     users = config["users"]

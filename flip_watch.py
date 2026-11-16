@@ -1,14 +1,10 @@
 # -*- coding: UTF-8 -*-
-"""u2 加速的底栏翻转感知。
+"""Canvas 自绘底栏的实时模板感知。
 
-真机验证结论：大麦详情页底栏（已预约/立即预订）是自绘控件，
-无障碍树里没有任何文本节点，``d(textContains=...)`` 永远等不到。
-但 u2 走本地 agent 截图只要 ~200ms（adb screencap 的一半以上），
-所以这里用 u2 截图 + 裁剪底栏条带 + 轻量 OCR 只做关键词匹配：
-一轮约 0.5 秒，比全屏 adb 截图 OCR（约 1.8 秒/轮）快 3 倍。
-
-设备需要先执行过一次 ``python -m uiautomator2 init``（装 atx-agent）。
-agent 不可用时报 FlipWatchError，调用方退回全屏 OCR 轮询。
+Scrcpy 持续视频帧只保留最新帧并裁剪购买栏；区域未变化时不执行匹配，
+变化后只接受“立即预订／立即购票／立即购买”正面模板命中。极速模式不调用
+OCR，也不把像素变化、“已预约”或未知画面当作放行信号。文件末尾的 u2 OCR
+实现仅保留给旧调用方，不参与极速模式。
 """
 from __future__ import annotations
 
@@ -161,6 +157,123 @@ def make_strip_stable_waiter(device: str):
         return False
 
     return "u2 底栏渲染稳定检测", wait
+
+
+SCRCPY_DIFF_THRESHOLD = 4.0
+SCRCPY_TEMPLATE_THRESHOLD = 0.86
+SCRCPY_TEMPLATE_DIR = Path(__file__).resolve().parent / "resources" / "flip-templates"
+
+
+def _scrcpy_crop(frame, focus_point=None, screen_size=None):
+    height, width = frame.shape[:2]
+    if focus_point and screen_size and all(screen_size):
+        scale_x = width / screen_size[0]
+        scale_y = height / screen_size[1]
+        center_x = int(focus_point[0] * scale_x)
+        center_y = int(focus_point[1] * scale_y)
+        half_width = max(120, int(width * 0.24))
+        left = max(0, center_x - half_width)
+        right = min(width, center_x + half_width)
+        top = max(0, center_y - int(height * 0.075))
+        bottom = min(height, center_y + int(height * 0.04))
+        if right > left and bottom > top:
+            return frame[top:bottom, left:right]
+    top = int(height * BOTTOM_STRIP_RATIO)
+    return frame[top:, :]
+
+
+def _small_gray(crop, cv2):
+    return cv2.resize(
+        cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY),
+        (160, 64),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+def _load_scrcpy_templates(cv2, template_dir=None):
+    directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
+    if not directory.is_dir():
+        return []
+    templates = []
+    for path in sorted(directory.glob("*.png")):
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if image is not None and image.size:
+            templates.append((path.stem, image))
+    return templates
+
+
+def _scrcpy_template_hit(crop, templates, cv2):
+    if not templates:
+        return False
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    for _name, template in templates:
+        for scale in (0.5, 0.59, 0.67, 0.8, 1.0, 1.25, 1.5, 2.0):
+            width = max(1, int(template.shape[1] * scale))
+            height = max(1, int(template.shape[0] * scale))
+            if width > gray.shape[1] or height > gray.shape[0]:
+                continue
+            resized = cv2.resize(template, (width, height), interpolation=cv2.INTER_AREA)
+            scores = cv2.matchTemplate(gray, resized, cv2.TM_CCOEFF_NORMED)
+            if float(scores.max()) >= SCRCPY_TEMPLATE_THRESHOLD:
+                return True
+    return False
+
+
+def make_scrcpy_watcher(
+    device: str,
+    focus_point=None,
+    screen_size=None,
+    template_dir=None,
+):
+    """持续接收 Scrcpy 最新帧，只接受购买按钮正面模板命中。"""
+    try:
+        import cv2
+        from scrcpy_stream import ScrcpyError, ScrcpyStream
+    except ImportError as exc:
+        raise FlipWatchError(f"Scrcpy 运行依赖不可用：{exc}") from exc
+
+    templates = _load_scrcpy_templates(cv2, template_dir)
+    if not templates:
+        directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
+        raise FlipWatchError(
+            f"未找到可购买按钮模板：{directory}；请先校准可购买详情页"
+        )
+
+    stream = ScrcpyStream(device)
+    try:
+        stream.start()
+    except (ScrcpyError, OSError) as exc:
+        stream.stop()
+        raise FlipWatchError(str(exc)) from exc
+
+    def watch(remaining: float) -> bool:
+        deadline = time.monotonic() + max(remaining, 0.0)
+        previous = None
+        try:
+            while time.monotonic() < deadline:
+                frame = stream.read_latest()
+                if frame is None:
+                    time.sleep(0.005)
+                    continue
+                crop = _scrcpy_crop(frame, focus_point, screen_size)
+                small = _small_gray(crop, cv2)
+                changed = previous is None or float(
+                    cv2.absdiff(small, previous).mean()
+                ) >= SCRCPY_DIFF_THRESHOLD
+                previous = small
+                if changed and _scrcpy_template_hit(crop, templates, cv2):
+                    return True
+            return False
+        except Exception as exc:
+            if isinstance(exc, FlipWatchError):
+                raise
+            raise FlipWatchError(
+                f"Scrcpy 视频感知失败（{type(exc).__name__}: {exc}）"
+            ) from exc
+        finally:
+            stream.stop()
+
+    return "Scrcpy 实时帧+按钮模板（无 OCR）", watch
 
 
 def make_flip_watcher(device: str, ocr_tool=None):
