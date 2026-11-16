@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -46,7 +47,7 @@ def _ocr_rows(image_path: str) -> list[tuple[int, int, str]]:
     """返回 [(x, y, 文本)]；工具缺失或失败返回空列表。"""
     try:
         result = subprocess.run(
-            [str(OCR_TOOL), image_path],
+            [sys.executable, str(OCR_TOOL), image_path],
             capture_output=True,
             text=True,
             timeout=90,

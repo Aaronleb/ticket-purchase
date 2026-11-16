@@ -13,6 +13,7 @@ agent 不可用时报 FlipWatchError，调用方退回全屏 OCR 轮询。
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -37,7 +38,7 @@ def _spawn_daemon(ocr_tool: Path):
     """启动 OCR 常驻进程，返回 (进程, 首行) 或失败时 None。"""
     try:
         proc = subprocess.Popen(
-            [str(ocr_tool), "--daemon"],
+            [sys.executable, str(ocr_tool), "--daemon"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
         )
         first = proc.stdout.readline().strip()
@@ -95,7 +96,7 @@ class _DaemonOcr:
 def _oneshot_texts(crop_path: str, ocr_tool: Path) -> list[str]:
     try:
         result = subprocess.run(
-            [str(ocr_tool), crop_path],
+            [sys.executable, str(ocr_tool), crop_path],
             capture_output=True, text=True, timeout=OCR_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError):
