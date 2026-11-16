@@ -144,7 +144,8 @@ def test_u2_watch_flips_early_releases(frozen):
     watch.assert_called_once()
     assert 0 < watch.call_args.args[0] <= 2.0
     bot._wait_for_sale.assert_not_called()
-    frozen.sleep.assert_called_once_with(1.0)  # 睡到开抢前 FLIP_WATCH_FROM 秒
+    assert frozen.sleep.call_args_list[0].args == (1.0,)  # 睡到开抢前 FLIP_WATCH_FROM 秒
+    assert frozen.sleep.call_args_list[-1].args == (0.15,)  # 翻转后留渲染时间
 
 
 def test_u2_watch_timeout_falls_back_to_timer(frozen):
@@ -217,3 +218,21 @@ def test_no_sensor_at_all_falls_back_to_timer(frozen):
 
     bot._wait_for_sale.assert_called_once_with()
     assert release is bot._wait_for_sale.return_value
+
+
+def test_empty_activity_waits_without_back_or_extra_tap(mocker):
+    """前台 Activity 暂空时只等待过渡，不返回、不重复点击。"""
+    bot = DamaiBot.__new__(DamaiBot)
+    bot.config = SimpleNamespace(device_name="test-device")
+    activities = iter(["", "NcovSkuActivity"])
+    taps = []
+    back = Mock()
+    bot._foreground_activity = lambda: next(activities)
+    bot._adb_tap = lambda *point: taps.append(point)
+    bot._adb = back
+    bot._mark = Mock()
+    mocker.patch.object(app_v2.time, "sleep", Mock())
+
+    assert bot._tap_buy_bar_until_next_page((100, 200)) == "NcovSkuActivity"
+    assert taps == [(100, 200)]
+    back.assert_not_called()

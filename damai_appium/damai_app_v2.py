@@ -63,8 +63,8 @@ CONFIRM_POINT_RATIO = (0.779, 0.945)
 SUBMIT_POINT_RATIO = (0.789, 0.945)
 # 极速模式点底栏：首轮等翻页的窗口（覆盖正常页面跳转时长），
 # 未翻页则按重试节奏再点，覆盖大麦按钮延迟翻转；总预算 BUY_RETRY_TIMEOUT 秒
-BUY_FIRST_WAIT = 0.6
-BUY_RETRY_WAIT = 0.25
+BUY_FIRST_WAIT = 0.9
+BUY_RETRY_WAIT = 0.3
 BUY_RETRY_TIMEOUT = 3.5
 
 
@@ -646,6 +646,7 @@ class DamaiBot:
                     f"感知到底栏已变为可购买状态，"
                     f"提前 {remaining:.1f} 秒放行"
                 )
+                time.sleep(0.15)
                 return SaleRelease(
                     target_time=target,
                     released_at=released_at,
@@ -672,14 +673,26 @@ class DamaiBot:
             wait_until = time.perf_counter() + (
                 BUY_FIRST_WAIT if attempts == 1 else BUY_RETRY_WAIT
             )
+            empty_seen = False
             while time.perf_counter() < wait_until:
                 activity = self._foreground_activity()
                 if "NcovSkuActivity" in activity or "DmOrderActivity" in activity:
                     if attempts > 1:
                         print(f"底栏点击 {attempts} 次后翻页")
                     return activity
+                if not activity:
+                    # 页面切换瞬间 topResumedActivity 可能为空：
+                    # 只等待过渡，不点击、不返回、不 sleep。
+                    if not empty_seen:
+                        print("前台 Activity 暂空，等待页面过渡（不返回、不点击）")
+                        empty_seen = True
+                    wait_until = min(
+                        deadline, max(wait_until, time.perf_counter() + 0.3)
+                    )
+                    continue
+                empty_seen = False
                 if "ProjectDetailActivity" not in activity:
-                    print(f"前台是 {activity or '未知'}，先返回详情页")
+                    print(f"前台是 {activity}，先返回详情页")
                     self._adb("input", "keyevent", "4")
                     time.sleep(0.4)
                     break
