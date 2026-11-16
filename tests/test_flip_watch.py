@@ -25,13 +25,14 @@ class FakeDateTime:
         return cls.points[0]
 
 
-def make_bot(now_points, ocr=None):
+def make_bot(now_points):
     bot = DamaiBot.__new__(DamaiBot)
     bot.config = SimpleNamespace(
         sell_start_time="2026-11-16T17:16:18+08:00",
         device_name="test-device",
+        flip_template_dir="/calibrated-templates",
     )
-    bot._ocr = ocr
+    bot._ocr = Mock()
     bot._buy_point = (793, 2617)
     bot._adb_size = Mock(return_value=(1220, 2712))
     bot._wait_for_sale = Mock()
@@ -46,11 +47,16 @@ def frozen(mocker):
     fake_time = SimpleNamespace(sleep=Mock(), monotonic=Mock(return_value=1000.0))
     mocker.patch.object(app_v2, "time", fake_time)
     mocker.patch.object(DamaiBot, "FLIP_WATCH_FROM", 1.0)
-    mocker.patch(
-        "flip_watch.make_scrcpy_watcher",
-        side_effect=FlipWatchError("测试默认关闭 Scrcpy"),
-    )
     return fake_time
+
+
+def write_template(path):
+    import cv2
+    import numpy as np
+
+    template = np.zeros((15, 60), dtype=np.uint8)
+    template[3:12, 5:55] = 255
+    cv2.imwrite(str(path / "buy.png"), template)
 
 
 def test_oneshot_texts_parses_tool_output(mocker):
@@ -61,7 +67,7 @@ def test_oneshot_texts_parses_tool_output(mocker):
         "已预约",
     ]
 
-    fail = mocker.patch("flip_watch.subprocess.run", side_effect=OSError("工具不存在"))
+    mocker.patch("flip_watch.subprocess.run", side_effect=OSError("工具不存在"))
     assert flip_watch._oneshot_texts("/tmp/x.png", flip_watch._DEFAULT_OCR_TOOL) == []
 
 
@@ -118,11 +124,11 @@ def test_flip_keywords_cover_buyable_texts():
     assert set(FLIP_KEYWORDS) >= {"立即预订", "立即购票", "立即购买"}
 
 
-def test_scrcpy_watch_flips_early_releases(frozen, mocker):
-    bot = make_bot([TARGET - timedelta(seconds=2)], ocr=Mock(return_value=[]))
+def test_template_hit_releases_without_ocr(frozen, mocker):
+    bot = make_bot([TARGET - timedelta(seconds=2)])
     watch = Mock(return_value=True)
     factory = mocker.patch(
-        "flip_watch.make_scrcpy_watcher", return_value=("Scrcpy", watch)
+        "flip_watch.make_scrcpy_watcher", return_value=("Scrcpy 模板", watch)
     )
     u2 = mocker.patch("flip_watch.make_flip_watcher")
 
@@ -131,88 +137,51 @@ def test_scrcpy_watch_flips_early_releases(frozen, mocker):
     assert release.delay_ms == pytest.approx(-2000)
     assert factory.call_args.kwargs["focus_point"] == (793, 2617)
     assert factory.call_args.kwargs["screen_size"] == (1220, 2712)
+    assert factory.call_args.kwargs["template_dir"] == "/calibrated-templates"
+    bot._ocr.assert_not_called()
     u2.assert_not_called()
-    bot._wait_for_sale.assert_not_called()
-
-
-def test_u2_watch_flips_early_releases(frozen, mocker):
-    bot = make_bot([TARGET - timedelta(seconds=2)], ocr=Mock(return_value=[]))
-    watch = Mock(return_value=True)
-    mocker.patch("flip_watch.make_flip_watcher", return_value=("u2", watch))
-
-    release = bot._wait_for_sale_with_flip_watch()
-
-    assert release.delay_ms == pytest.approx(-2000)
-    watch.assert_called_once()
     bot._wait_for_sale.assert_not_called()
     frozen.sleep.assert_called_once_with(1.0)
 
 
-def test_watch_timeout_stops_instead_of_blind_timer(frozen, mocker):
-    bot = make_bot([TARGET - timedelta(seconds=0.5)], ocr=Mock(return_value=[]))
-    mocker.patch("flip_watch.make_flip_watcher", return_value=("u2", Mock(return_value=False)))
-
-    with pytest.raises(SaleTimeError, match="未点击"):
-        bot._wait_for_sale_with_flip_watch()
-    bot._wait_for_sale.assert_not_called()
-
-
-def test_scrcpy_failure_falls_back_to_u2(frozen, mocker):
-    bot = make_bot([TARGET - timedelta(seconds=2)], ocr=Mock(return_value=[]))
+def test_template_timeout_stops_without_ocr_or_blind_timer(frozen, mocker):
+    bot = make_bot([TARGET - timedelta(seconds=0.5)])
     mocker.patch(
         "flip_watch.make_scrcpy_watcher",
-        return_value=("Scrcpy", Mock(side_effect=RuntimeError("视频断开"))),
-    )
-    u2_watch = Mock(return_value=True)
-    mocker.patch("flip_watch.make_flip_watcher", return_value=("u2", u2_watch))
-
-    release = bot._wait_for_sale_with_flip_watch()
-
-    assert release.delay_ms == pytest.approx(-2000)
-    u2_watch.assert_called_once()
-
-
-def test_u2_repeated_errors_fall_back_to_ocr(frozen, mocker):
-    rows_hit = [(100, 2600, 0.95, "立即预订")]
-    ocr = Mock(side_effect=[[], rows_hit])
-    bot = make_bot([TARGET - timedelta(seconds=2)], ocr=ocr)
-    watch = Mock(side_effect=[RuntimeError("agent 掉线")] * 3)
-    mocker.patch("flip_watch.make_flip_watcher", return_value=("u2", watch))
-
-    release = bot._wait_for_sale_with_flip_watch()
-
-    assert release.target_time == TARGET
-    assert watch.call_count == 3
-    assert ocr.call_count == 2
-    bot._wait_for_sale.assert_not_called()
-
-
-def test_agent_unavailable_falls_back_to_ocr_poll(frozen, mocker):
-    rows_hit = [(100, 2600, 0.95, "立即预订")]
-    ocr = Mock(side_effect=[[], rows_hit])
-    bot = make_bot([TARGET - timedelta(seconds=2)], ocr=ocr)
-    mocker.patch(
-        "flip_watch.make_flip_watcher",
-        side_effect=FlipWatchError("atx-agent 未安装"),
-    )
-
-    release = bot._wait_for_sale_with_flip_watch()
-
-    assert release.target_time == TARGET
-    assert ocr.call_count == 2
-    bot._wait_for_sale.assert_not_called()
-
-
-def test_no_sensor_at_all_stops_without_blind_timer(frozen, mocker):
-    bot = make_bot([TARGET - timedelta(seconds=2)], ocr=None)
-    mocker.patch(
-        "flip_watch.make_flip_watcher",
-        side_effect=FlipWatchError("atx-agent 未安装"),
+        return_value=("Scrcpy 模板", Mock(return_value=False)),
     )
 
     with pytest.raises(SaleTimeError, match="未点击"):
         bot._wait_for_sale_with_flip_watch()
+    bot._ocr.assert_not_called()
     bot._wait_for_sale.assert_not_called()
+
+
+def test_missing_template_stops_before_sale(frozen, mocker):
+    bot = make_bot([TARGET - timedelta(seconds=2)])
+    mocker.patch(
+        "flip_watch.make_scrcpy_watcher",
+        side_effect=FlipWatchError("未找到可购买按钮模板"),
+    )
+
+    with pytest.raises(SaleTimeError, match="未点击"):
+        bot._wait_for_sale_with_flip_watch()
+    bot._ocr.assert_not_called()
+    bot._wait_for_sale.assert_not_called()
+
+
+def test_video_failure_does_not_fall_back_to_ocr(frozen, mocker):
+    bot = make_bot([TARGET - timedelta(seconds=2)])
+    mocker.patch(
+        "flip_watch.make_scrcpy_watcher",
+        return_value=("Scrcpy 模板", Mock(side_effect=RuntimeError("视频断开"))),
+    )
+    u2 = mocker.patch("flip_watch.make_flip_watcher")
+
+    with pytest.raises(SaleTimeError, match="未点击"):
+        bot._wait_for_sale_with_flip_watch()
+    bot._ocr.assert_not_called()
+    u2.assert_not_called()
 
 
 def test_after_sale_hit_reports_positive_delay(frozen, mocker):
@@ -221,10 +190,12 @@ def test_after_sale_hit_reports_positive_delay(frozen, mocker):
             TARGET - timedelta(seconds=2),
             TARGET - timedelta(seconds=2),
             TARGET + timedelta(seconds=1.2),
-        ],
-        ocr=Mock(return_value=[]),
+        ]
     )
-    mocker.patch("flip_watch.make_flip_watcher", return_value=("u2", Mock(return_value=True)))
+    mocker.patch(
+        "flip_watch.make_scrcpy_watcher",
+        return_value=("Scrcpy 模板", Mock(return_value=True)),
+    )
 
     release = bot._wait_for_sale_with_flip_watch()
 
@@ -232,8 +203,8 @@ def test_after_sale_hit_reports_positive_delay(frozen, mocker):
 
 
 def test_expired_sale_time_does_not_start_sensor(frozen, mocker):
-    bot = make_bot([TARGET + timedelta(seconds=1)], ocr=Mock(return_value=[]))
-    factory = mocker.patch("flip_watch.make_flip_watcher")
+    bot = make_bot([TARGET + timedelta(seconds=1)])
+    factory = mocker.patch("flip_watch.make_scrcpy_watcher")
 
     with pytest.raises(SaleTimeError, match="已过"):
         bot._wait_for_sale_with_flip_watch()
@@ -241,9 +212,10 @@ def test_expired_sale_time_does_not_start_sensor(frozen, mocker):
     bot._wait_for_sale.assert_not_called()
 
 
-def test_scrcpy_watch_skips_ocr_for_unchanged_frames(mocker):
+def test_scrcpy_unchanged_frame_skips_template_matching(mocker, tmp_path):
     import numpy as np
 
+    write_template(tmp_path)
     first = np.zeros((120, 120, 3), dtype=np.uint8)
     changed = first.copy()
     changed[100:, :] = 255
@@ -263,19 +235,19 @@ def test_scrcpy_watch_skips_ocr_for_unchanged_frames(mocker):
             self.stopped = True
 
     mocker.patch("scrcpy_stream.ScrcpyStream", FakeStream)
-    ocr = mocker.patch.object(
-        flip_watch._DaemonOcr,
-        "texts",
-        side_effect=[["已预约"], ["立即预订"]],
+    match = mocker.patch.object(
+        flip_watch, "_scrcpy_template_hit", side_effect=[False, True]
     )
-    name, watch = flip_watch.make_scrcpy_watcher("fake")
+    ocr = mocker.patch.object(flip_watch._DaemonOcr, "texts")
+    name, watch = flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
 
     assert watch(1.0) is True
-    assert ocr.call_count == 2
-    assert "Scrcpy" in name
+    assert match.call_count == 2
+    assert "无 OCR" in name
+    ocr.assert_not_called()
 
 
-def test_scrcpy_template_match_skips_ocr(mocker, tmp_path):
+def test_scrcpy_real_template_match_uses_no_ocr(mocker, tmp_path):
     import cv2
     import numpy as np
 
@@ -299,15 +271,16 @@ def test_scrcpy_template_match_skips_ocr(mocker, tmp_path):
 
     mocker.patch("scrcpy_stream.ScrcpyStream", FakeStream)
     ocr = mocker.patch.object(flip_watch._DaemonOcr, "texts")
-    name, watch = flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
+    _, watch = flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
 
     assert watch(1.0) is True
-    assert "模板" in name
     ocr.assert_not_called()
 
 
-def test_scrcpy_blocked_text_never_releases(mocker):
+def test_pixel_change_without_positive_template_never_releases(mocker, tmp_path):
     import numpy as np
+
+    write_template(tmp_path)
 
     class FakeStream:
         def __init__(self, _device):
@@ -317,14 +290,25 @@ def test_scrcpy_blocked_text_never_releases(mocker):
             pass
 
         def read_latest(self):
-            return np.zeros((120, 120, 3), dtype=np.uint8)
+            return np.random.default_rng(3).integers(
+                0, 255, (120, 120, 3), dtype=np.uint8
+            )
 
         def stop(self):
             self.stopped = True
 
     mocker.patch("scrcpy_stream.ScrcpyStream", FakeStream)
-    mocker.patch.object(flip_watch._DaemonOcr, "texts", return_value=["已预约"])
+    ocr = mocker.patch.object(flip_watch._DaemonOcr, "texts")
     mocker.patch.object(flip_watch.time, "monotonic", side_effect=[0.0, 0.0, 2.0])
-    _, watch = flip_watch.make_scrcpy_watcher("fake")
+    _, watch = flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
 
     assert watch(1.0) is False
+    ocr.assert_not_called()
+
+
+def test_missing_template_file_rejects_before_starting_stream(mocker, tmp_path):
+    stream = mocker.patch("scrcpy_stream.ScrcpyStream")
+
+    with pytest.raises(FlipWatchError, match="未找到可购买按钮模板"):
+        flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
+    stream.assert_not_called()

@@ -1,10 +1,10 @@
 # -*- coding: UTF-8 -*-
-"""Canvas 自绘底栏的实时翻转感知。
+"""Canvas 自绘底栏的实时模板感知。
 
-优先接收 Scrcpy 持续视频帧，只取最新帧并裁剪购买栏；区域未变化时不运行
-OCR，变化后先尝试按钮模板，再退回常驻 RapidOCR 做购买文案白名单确认。
-Scrcpy 不可用时退回 u2 截图轮询，两者都不可用时由调用方使用全屏 OCR。
-所有路径都只正面确认可购买状态，不把“已预约”或未知画面当作放行信号。
+Scrcpy 持续视频帧只保留最新帧并裁剪购买栏；区域未变化时不执行匹配，
+变化后只接受“立即预订／立即购票／立即购买”正面模板命中。极速模式不调用
+OCR，也不把像素变化、“已预约”或未知画面当作放行信号。文件末尾的 u2 OCR
+实现仅保留给旧调用方，不参与极速模式。
 """
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ def _scrcpy_template_hit(crop, templates, cv2):
         return False
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     for _name, template in templates:
-        for scale in (0.5, 0.67, 0.8, 1.0, 1.25, 1.5, 2.0):
+        for scale in (0.5, 0.59, 0.67, 0.8, 1.0, 1.25, 1.5, 2.0):
             width = max(1, int(template.shape[1] * scale))
             height = max(1, int(template.shape[0] * scale))
             if width > gray.shape[1] or height > gray.shape[0]:
@@ -220,17 +220,23 @@ def _scrcpy_template_hit(crop, templates, cv2):
 
 def make_scrcpy_watcher(
     device: str,
-    ocr_tool=None,
     focus_point=None,
     screen_size=None,
     template_dir=None,
 ):
-    """持续接收 Scrcpy 最新帧，仅对变化的购买栏区域做正面识别。"""
+    """持续接收 Scrcpy 最新帧，只接受购买按钮正面模板命中。"""
     try:
         import cv2
         from scrcpy_stream import ScrcpyError, ScrcpyStream
     except ImportError as exc:
         raise FlipWatchError(f"Scrcpy 运行依赖不可用：{exc}") from exc
+
+    templates = _load_scrcpy_templates(cv2, template_dir)
+    if not templates:
+        directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
+        raise FlipWatchError(
+            f"未找到可购买按钮模板：{directory}；请先校准可购买详情页"
+        )
 
     stream = ScrcpyStream(device)
     try:
@@ -238,12 +244,6 @@ def make_scrcpy_watcher(
     except (ScrcpyError, OSError) as exc:
         stream.stop()
         raise FlipWatchError(str(exc)) from exc
-
-    tool = Path(ocr_tool) if ocr_tool else _DEFAULT_OCR_TOOL
-    templates = _load_scrcpy_templates(cv2, template_dir)
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    crop_path = tmp.name
-    tmp.close()
 
     def watch(remaining: float) -> bool:
         deadline = time.monotonic() + max(remaining, 0.0)
@@ -260,14 +260,7 @@ def make_scrcpy_watcher(
                     cv2.absdiff(small, previous).mean()
                 ) >= SCRCPY_DIFF_THRESHOLD
                 previous = small
-                if not changed:
-                    continue
-                if _scrcpy_template_hit(crop, templates, cv2):
-                    return True
-                if not cv2.imwrite(crop_path, crop):
-                    continue
-                texts = _DaemonOcr.texts(crop_path, tool)
-                if any(keyword in text for keyword in FLIP_KEYWORDS for text in texts):
+                if changed and _scrcpy_template_hit(crop, templates, cv2):
                     return True
             return False
         except Exception as exc:
@@ -278,10 +271,8 @@ def make_scrcpy_watcher(
             ) from exc
         finally:
             stream.stop()
-            Path(crop_path).unlink(missing_ok=True)
 
-    name = "Scrcpy 实时帧+按钮模板" if templates else "Scrcpy 实时帧+底栏 OCR"
-    return name, watch
+    return "Scrcpy 实时帧+按钮模板（无 OCR）", watch
 
 
 def make_flip_watcher(device: str, ocr_tool=None):

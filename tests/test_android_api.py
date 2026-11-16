@@ -107,6 +107,26 @@ class AndroidApiTests(unittest.TestCase):
         self.assertIn(f"android fake started: {self.appium_dir.resolve()}", lines)
         self.assertIn("大麦 App 确认订单状态", current["message"])
 
+    def test_android_calibration_saves_template_directory(self):
+        self.request("PUT", "/api/android/config", valid_android_config())
+        expected_dir = (self.appium_dir / "flip-templates").resolve()
+        result = {
+            "field": "buy_point",
+            "page": "详情页",
+            "button": "立即预订",
+            "point": "500,1800",
+            "activity": "ProjectDetailActivity",
+            "template_path": str(expected_dir / "buy.png"),
+        }
+        with patch("app.calibrate_android_point", return_value=result) as calibrate:
+            status, saved = self.request("POST", "/api/android/calibrate")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["config"]["flip_template_dir"], str(expected_dir))
+        self.assertEqual(calibrate.call_args.kwargs["template_dir"], expected_dir)
+        _, loaded = self.request("GET", "/api/android/config")
+        self.assertEqual(loaded["flip_template_dir"], str(expected_dir))
+
     def test_android_only_application_disables_pc_and_reports_runtime(self):
         packaged = create_server(
             self.root,

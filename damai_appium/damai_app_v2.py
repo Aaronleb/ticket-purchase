@@ -225,16 +225,6 @@ class DamaiBot:
         width, height = self._adb_size()
         return int(width * ratio[0]), int(height * ratio[1])
 
-    def _report_screen(self, label):
-        """提交后取一张图 OCR 一下，只作记录，不影响速度。"""
-        try:
-            self._screenshot("/tmp/damai_after.png")
-            rows = self._ocr()
-            texts = [text for _x, _y, _c, text in rows][:8]
-            print(f"{label}：{' / '.join(texts)}")
-        except Exception as exc:
-            print(f"{label}：截图识别失败（{exc}）")
-
     def _wait_activity(self, marker, deadline):
         while time.perf_counter() < deadline:
             if marker in self._foreground_activity():
@@ -558,33 +548,13 @@ class DamaiBot:
         )
 
     # ---------- 开抢前：按钮翻转感知 ----------
-    FLIP_KEYWORDS = ("立即预订", "立即购票", "立即购买")
-    # 开抢前多少秒开始感知底栏文案
     FLIP_WATCH_FROM = 30.0
-    # 全屏 OCR 降级路径的轮询间隔
-    FLIP_POLL_INTERVAL = 0.2
-    # 连续多少轮识别失败就停止，禁止退回纯定时盲点
-    FLIP_MAX_FAILURES = 3
-
-    def _flip_detected(self, rows, height):
-        """底栏区域（屏幕下 20%）出现可购买文案即认为按钮已翻转。"""
-        return any(
-            y > height * 0.8 and any(keyword in text for keyword in self.FLIP_KEYWORDS)
-            for _x, y, _c, text in rows
-        )
-
-    # 到点仍未确认可购买时继续感知；超时停止，绝不退回纯定时盲点
+    # 到点仍未匹配到正面模板时继续感知；超时停止，禁止 OCR 或纯定时盲点
     FLIP_POST_SALE_TIMEOUT = 15.0
 
     def _wait_for_sale_with_flip_watch(self):
-        """仅在正面识别到可购买按钮时放行，Scrcpy 优先、u2 OCR 降级。"""
+        """仅在 Scrcpy 画面正面匹配到可购买按钮模板时放行。"""
         target = parse_sale_time(self.config.sell_start_time)
-        if self._ocr is not None:
-            try:
-                warm_rows = self._ocr()
-                print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
-            except Exception as exc:
-                print(f"OCR 预热失败（{exc}），继续使用实时视频感知")
         remaining = (target - datetime.now(SHANGHAI)).total_seconds()
         if remaining <= 0:
             raise SaleTimeError("抢购时间已过，未执行购买")
@@ -592,9 +562,6 @@ class DamaiBot:
             time.sleep(remaining - self.FLIP_WATCH_FROM)
 
         width, height = self._adb_size()
-        watch = None
-        watch_name = ""
-        watch_kind = ""
         try:
             from flip_watch import make_scrcpy_watcher
 
@@ -602,76 +569,19 @@ class DamaiBot:
                 self.config.device_name,
                 focus_point=self._buy_point,
                 screen_size=(width, height),
+                template_dir=getattr(self.config, "flip_template_dir", "") or None,
             )
-            watch_kind = "scrcpy"
         except Exception as exc:
-            print(f"Scrcpy 实时感知不可用（{exc}），尝试 u2 截图监听")
-        if watch is None:
-            try:
-                from flip_watch import make_flip_watcher
+            raise SaleTimeError(f"Scrcpy 模板感知不可用：{exc}；未点击") from exc
 
-                watch_name, watch = make_flip_watcher(self.config.device_name)
-                watch_kind = "u2"
-            except Exception as exc:
-                print(f"u2 截图监听不可用（{exc}），退回全屏 OCR 轮询感知")
-        if watch is None and self._ocr is None:
-            raise SaleTimeError("无可用按钮感知手段，已停止且未点击")
-
-        print(f"按钮翻转感知：{watch_name or '全屏 OCR 轮询'}")
+        print(f"按钮翻转感知：{watch_name}")
         remaining = (target - datetime.now(SHANGHAI)).total_seconds()
-        deadline = time.monotonic() + max(remaining, 0.0) + self.FLIP_POST_SALE_TIMEOUT
-        failures = 0
-        while True:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                raise SaleTimeError("等待可购买按钮超时，已停止且未点击")
-            if watch is not None:
-                timed_out = False
-                try:
-                    flipped = watch(left)
-                    timed_out = not flipped
-                    failures = 0
-                except Exception as exc:
-                    flipped = False
-                    failures += 1
-                    print(f"{watch_name}异常：{exc}")
-                    if watch_kind == "scrcpy":
-                        watch = None
-                        try:
-                            from flip_watch import make_flip_watcher
-
-                            watch_name, watch = make_flip_watcher(self.config.device_name)
-                            watch_kind = "u2"
-                            failures = 0
-                            print(f"已降级到：{watch_name}")
-                        except Exception as fallback_exc:
-                            print(f"u2 降级也不可用（{fallback_exc}），改用全屏 OCR")
-                    elif failures >= self.FLIP_MAX_FAILURES:
-                        watch = None
-                if flipped:
-                    break
-                if timed_out:
-                    raise SaleTimeError("等待可购买按钮超时，已停止且未点击")
-                if watch is not None:
-                    continue
-
-            try:
-                if self._ocr is None:
-                    raise SaleTimeError("OCR 不可用，无法安全确认购买按钮")
-                rows = self._ocr()
-                failures = 0
-                flipped = self._flip_detected(rows, height)
-            except SaleTimeError:
-                raise
-            except Exception as exc:
-                flipped = False
-                failures += 1
-                print(f"翻转感知第 {failures} 轮识别失败：{exc}")
-                if failures >= self.FLIP_MAX_FAILURES:
-                    raise SaleTimeError("按钮识别连续失败，已停止且未点击") from exc
-            if flipped:
-                break
-            time.sleep(self.FLIP_POLL_INTERVAL)
+        try:
+            flipped = watch(max(remaining, 0.0) + self.FLIP_POST_SALE_TIMEOUT)
+        except Exception as exc:
+            raise SaleTimeError(f"按钮模板感知异常：{exc}；未点击") from exc
+        if not flipped:
+            raise SaleTimeError("等待可购买按钮模板超时，已停止且未点击")
 
         released_at = datetime.now(SHANGHAI)
         released_monotonic = time.monotonic()
@@ -782,7 +692,6 @@ class DamaiBot:
             if self._wait_activity_gone("DmOrderActivity", time.perf_counter() + 0.8):
                 break
         print(f"提交完成，全链路耗时：{time.perf_counter() - self._started_at:.2f} 秒")
-        self._report_screen("提交后")
         return True
 
     def run_ticket_grabbing(self):

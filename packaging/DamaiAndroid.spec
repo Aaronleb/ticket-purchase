@@ -1,9 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_all
+
 ROOT = Path.cwd()
 PROJECT_ROOT = ROOT
 
+ocr_datas, ocr_binaries, ocr_hiddenimports = collect_all("rapidocr_onnxruntime")
 hiddenimports = [
     "damai_appium.config",
     "damai_appium.damai_app_v2",
@@ -12,16 +15,16 @@ hiddenimports = [
     "av",
     "cv2",
     "adbutils",
-]
+] + ocr_hiddenimports
 
 analysis = Analysis(
     [str(ROOT / "desktop_app.py")],
     pathex=[str(ROOT), str(PROJECT_ROOT)],
-    binaries=[],
+    binaries=ocr_binaries,
     datas=[
         (str(ROOT / "static"), "static"),
         (str(ROOT / "resources"), "resources"),
-    ],
+    ] + ocr_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
