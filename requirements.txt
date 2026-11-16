@@ -3,3 +3,5 @@ Appium-Python-Client==4.2.1
 webdriver-manager>=4.0
 chromedriver-autoinstaller>=0.6
 uiautomator2==3.7.1
+av==16.1.0
+opencv-python==5.0.0.93

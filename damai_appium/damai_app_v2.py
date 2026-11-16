@@ -559,11 +559,11 @@ class DamaiBot:
 
     # ---------- 开抢前：按钮翻转感知 ----------
     FLIP_KEYWORDS = ("立即预订", "立即购票", "立即购买")
-    # 开抢前多少秒开始 OCR 轮询底栏文案
+    # 开抢前多少秒开始感知底栏文案
     FLIP_WATCH_FROM = 30.0
-    # 每轮 OCR 之间的间隔（一轮约 1.8 秒：截图 + 识别）
+    # 全屏 OCR 降级路径的轮询间隔
     FLIP_POLL_INTERVAL = 0.2
-    # 连续多少轮识别失败就放弃感知，退回纯定时
+    # 连续多少轮识别失败就停止，禁止退回纯定时盲点
     FLIP_MAX_FAILURES = 3
 
     def _flip_detected(self, rows, height):
@@ -573,84 +573,125 @@ class DamaiBot:
             for _x, y, _c, text in rows
         )
 
-    def _wait_for_sale_with_flip_watch(self):
-        """极速模式等待开售：提前 OCR 感知按钮翻转。
+    # 到点仍未确认可购买时继续感知；超时停止，绝不退回纯定时盲点
+    FLIP_POST_SALE_TIMEOUT = 15.0
 
-        开抢前 30 秒起轮询底栏：一旦底栏出现「立即预订/立即购票」
-        立即放行（大麦提前放票也能赶上，delay_ms 为负表示提前量）；
-        到点未感知到则交回精准定时放行，由底栏重试逻辑兜底。
-        优先 u2 截图+底栏裁剪 OCR（一轮约 0.5 秒），agent 不可用
-        退回全屏 adb 截图 OCR（一轮约 1.8 秒）。
-        """
+    def _wait_for_sale_with_flip_watch(self):
+        """仅在正面识别到可购买按钮时放行，Scrcpy 优先、u2 OCR 降级。"""
         target = parse_sale_time(self.config.sell_start_time)
-        try:
-            warm_rows = self._ocr()
-            print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
-        except Exception as exc:
-            print(f"OCR 预热失败（{exc}），按钮翻转感知将只靠 u2 截图监听")
+        if self._ocr is not None:
+            try:
+                warm_rows = self._ocr()
+                print(f"OCR 预热完成（本轮识别 {len(warm_rows)} 条文字）")
+            except Exception as exc:
+                print(f"OCR 预热失败（{exc}），继续使用实时视频感知")
         remaining = (target - datetime.now(SHANGHAI)).total_seconds()
+        if remaining <= 0:
+            raise SaleTimeError("抢购时间已过，未执行购买")
         if remaining > self.FLIP_WATCH_FROM:
             time.sleep(remaining - self.FLIP_WATCH_FROM)
-        watch = None
-        watch_name = "OCR 轮询"
-        try:
-            from flip_watch import make_flip_watcher
 
-            watch_name, watch = make_flip_watcher(self.config.device_name)
-        except Exception as exc:
-            print(f"u2 截图监听不可用（{exc}），退回 OCR 轮询感知")
-        if watch is None and self._ocr is None:
-            print("无可用感知手段，改纯定时")
-            return self._wait_for_sale()
-        print(f"按钮翻转感知：{watch_name}")
         width, height = self._adb_size()
+        watch = None
+        watch_name = ""
+        watch_kind = ""
+        try:
+            from flip_watch import make_scrcpy_watcher
+
+            watch_name, watch = make_scrcpy_watcher(
+                self.config.device_name,
+                focus_point=self._buy_point,
+                screen_size=(width, height),
+            )
+            watch_kind = "scrcpy"
+        except Exception as exc:
+            print(f"Scrcpy 实时感知不可用（{exc}），尝试 u2 截图监听")
+        if watch is None:
+            try:
+                from flip_watch import make_flip_watcher
+
+                watch_name, watch = make_flip_watcher(self.config.device_name)
+                watch_kind = "u2"
+            except Exception as exc:
+                print(f"u2 截图监听不可用（{exc}），退回全屏 OCR 轮询感知")
+        if watch is None and self._ocr is None:
+            raise SaleTimeError("无可用按钮感知手段，已停止且未点击")
+
+        print(f"按钮翻转感知：{watch_name or '全屏 OCR 轮询'}")
+        remaining = (target - datetime.now(SHANGHAI)).total_seconds()
+        deadline = time.monotonic() + max(remaining, 0.0) + self.FLIP_POST_SALE_TIMEOUT
         failures = 0
         while True:
-            remaining = (target - datetime.now(SHANGHAI)).total_seconds()
-            if remaining <= 0.3:
-                print("到点未感知到按钮翻转，按精准定时放行（底栏重试兜底）")
-                return self._wait_for_sale()
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise SaleTimeError("等待可购买按钮超时，已停止且未点击")
             if watch is not None:
+                timed_out = False
                 try:
-                    flipped = watch(remaining - 0.3)
+                    flipped = watch(left)
+                    timed_out = not flipped
                     failures = 0
                 except Exception as exc:
                     flipped = False
                     failures += 1
-                    print(f"翻转感知第 {failures} 轮异常：{exc}")
-                    if failures >= self.FLIP_MAX_FAILURES:
-                        print("感知连续异常，放弃感知，改纯定时")
-                        return self._wait_for_sale()
-            else:
-                try:
-                    rows = self._ocr()
-                    failures = 0
-                    flipped = self._flip_detected(rows, height)
-                except Exception as exc:
-                    flipped = False
-                    failures += 1
-                    print(f"翻转感知第 {failures} 轮识别失败：{exc}")
-                    if failures >= self.FLIP_MAX_FAILURES:
-                        print("识别连续失败，放弃感知，改纯定时")
-                        return self._wait_for_sale()
+                    print(f"{watch_name}异常：{exc}")
+                    if watch_kind == "scrcpy":
+                        watch = None
+                        try:
+                            from flip_watch import make_flip_watcher
+
+                            watch_name, watch = make_flip_watcher(self.config.device_name)
+                            watch_kind = "u2"
+                            failures = 0
+                            print(f"已降级到：{watch_name}")
+                        except Exception as fallback_exc:
+                            print(f"u2 降级也不可用（{fallback_exc}），改用全屏 OCR")
+                    elif failures >= self.FLIP_MAX_FAILURES:
+                        watch = None
+                if flipped:
+                    break
+                if timed_out:
+                    raise SaleTimeError("等待可购买按钮超时，已停止且未点击")
+                if watch is not None:
+                    continue
+
+            try:
+                if self._ocr is None:
+                    raise SaleTimeError("OCR 不可用，无法安全确认购买按钮")
+                rows = self._ocr()
+                failures = 0
+                flipped = self._flip_detected(rows, height)
+            except SaleTimeError:
+                raise
+            except Exception as exc:
+                flipped = False
+                failures += 1
+                print(f"翻转感知第 {failures} 轮识别失败：{exc}")
+                if failures >= self.FLIP_MAX_FAILURES:
+                    raise SaleTimeError("按钮识别连续失败，已停止且未点击") from exc
             if flipped:
-                released_at = datetime.now(SHANGHAI)
-                print(
-                    f"感知到底栏已变为可购买状态，"
-                    f"提前 {remaining:.1f} 秒放行"
-                )
-                return SaleRelease(
-                    target_time=target,
-                    released_at=released_at,
-                    target_monotonic=time.monotonic() + max(remaining, 0.0),
-                    released_monotonic=time.monotonic(),
-                )
+                break
+            time.sleep(self.FLIP_POLL_INTERVAL)
+
+        released_at = datetime.now(SHANGHAI)
+        released_monotonic = time.monotonic()
+        remaining = (target - released_at).total_seconds()
+        if remaining >= 0:
+            print(f"感知到底栏已变为可购买状态，提前 {remaining:.3f} 秒放行")
+        else:
+            print(f"感知到底栏已变为可购买状态，开售后 {-remaining:.3f} 秒放行")
+        return SaleRelease(
+            target_time=target,
+            released_at=released_at,
+            target_monotonic=released_monotonic + remaining,
+            released_monotonic=released_monotonic,
+        )
 
     def _tap_buy_bar_until_next_page(self, point):
-        """到点直点底栏直到离开详情页。
+        """正面确认可购买后点击底栏，直到离开详情页。
 
-        覆盖两种现实情况：大麦按钮延迟翻转（间隔重试），以及点到“已预约”
-        被带去别的页面（先退回详情页再点）。返回翻页后的 Activity 名。
+        重试覆盖点击后页面未响应；若仍误入“已预约”等页面，先退回详情页。
+        返回翻页后的 Activity 名。
         """
         deadline = time.perf_counter() + BUY_RETRY_TIMEOUT
         attempts = 0

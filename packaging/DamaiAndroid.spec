@@ -4,13 +4,24 @@ from pathlib import Path
 ROOT = Path.cwd()
 PROJECT_ROOT = ROOT
 
-hiddenimports = ["damai_appium.config", "damai_appium.damai_app_v2"]
+hiddenimports = [
+    "damai_appium.config",
+    "damai_appium.damai_app_v2",
+    "flip_watch",
+    "scrcpy_stream",
+    "av",
+    "cv2",
+    "adbutils",
+]
 
 analysis = Analysis(
     [str(ROOT / "desktop_app.py")],
     pathex=[str(ROOT), str(PROJECT_ROOT)],
     binaries=[],
-    datas=[(str(ROOT / "static"), "static")],
+    datas=[
+        (str(ROOT / "static"), "static"),
+        (str(ROOT / "resources"), "resources"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

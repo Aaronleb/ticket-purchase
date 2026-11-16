@@ -27,6 +27,11 @@ if [[ ! -f "$PROJECT_ROOT/damai_appium/damai_app_v2.py" ]]; then
   echo "未找到原安卓项目：$PROJECT_ROOT" >&2
   exit 1
 fi
+SCRCPY_SERVER="$ROOT/resources/scrcpy-server-v$SCRCPY_VERSION"
+if [[ ! -f "$SCRCPY_SERVER" ]] || [[ "$(shasum -a 256 "$SCRCPY_SERVER" | cut -d ' ' -f 1)" != "$SCRCPY_SERVER_SHA256" ]]; then
+  echo "Scrcpy server 缺失或校验失败：$SCRCPY_SERVER" >&2
+  exit 1
+fi
 
 mkdir -p "$DOWNLOADS" "$DIST"
 if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
