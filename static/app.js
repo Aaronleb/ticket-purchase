@@ -307,7 +307,7 @@ async function calibrateAndroidPoint() {
   try {
     const result = await api("/api/android/calibrate", { method: "POST" });
     fillAndroidConfig(result.config);
-    hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。${result.template_path ? " 已保存无 OCR 购买按钮模板。" : ""}`;
+    hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。${result.template_path ? " 已保存无 OCR 购买按钮模板。" : ""}${result.warning ? ` ${result.warning}` : ""}`;
     toast(`已采集「${result.button}」坐标 ${result.point}`);
   } catch (error) {
     hint.textContent = `${error.message}（${defaultHint}）`;

@@ -81,3 +81,13 @@ def test_saved_template_is_grayscale_button_crop(tmp_path):
     template = Image.open(destination)
     assert template.mode == "L"
     assert template.size == (360, 140)
+
+
+def test_dim_template_warns_about_presale_button(tmp_path):
+    dark = tmp_path / "dark.png"
+    Image.new("L", (100, 40), 60).save(dark)
+    assert "未开售" in android_calibrate._template_warning(str(dark))
+
+    bright = tmp_path / "bright.png"
+    Image.new("L", (100, 40), 240).save(bright)
+    assert android_calibrate._template_warning(str(bright)) == ""

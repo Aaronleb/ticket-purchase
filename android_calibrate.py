@@ -112,6 +112,27 @@ def _save_buy_template(image_path: str, point, template_dir) -> str:
     return str(destination)
 
 
+def _template_warning(template_path: str) -> str:
+    """模板是灰暗的未开售按钮时提示风险（灰度模板只能确认文字形状）。"""
+    try:
+        from PIL import Image
+
+        with Image.open(template_path) as image:
+            values = image.convert("L").tobytes()
+    except Exception:
+        return ""
+    if not values:
+        return ""
+    bright = sum(1 for value in values if value >= 170) / len(values)
+    if bright < 0.08:
+        return (
+            "模板看起来是未开售的灰色按钮：模板只认字形，"
+            "程序还会检查底栏是否已变成可购买的着色状态才放行；"
+            "如条件允许，请在按钮真正可购买时重新采集一次模板。"
+        )
+    return ""
+
+
 def calibrate_android_point(device: str, template_dir=None) -> dict:
     """识别当前页面并采集对应按钮坐标，返回结果 dict（不含写配置）。"""
     if not device:
@@ -155,4 +176,7 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
     }
     if field == "buy_point" and text_confirmed and template_dir:
         result["template_path"] = _save_buy_template(image_path, point, template_dir)
+        warning = _template_warning(result["template_path"])
+        if warning:
+            result["warning"] = warning
     return result
