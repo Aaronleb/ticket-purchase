@@ -54,10 +54,7 @@ VIEWER_CHECKBOX_ID = "cn.damai:id/checkbox"
 # 配置里写了 confirm_point/submit_point 精确坐标时优先用配置值）
 CONFIRM_POINT_RATIO = (0.779, 0.945)
 SUBMIT_POINT_RATIO = (0.789, 0.945)
-# 极速模式点底栏：首轮等翻页的窗口（覆盖正常页面跳转时长），
-# 未翻页则按重试节奏再点，覆盖大麦按钮延迟翻转；总预算 BUY_RETRY_TIMEOUT 秒
-BUY_FIRST_WAIT = 0.6
-BUY_RETRY_WAIT = 0.25
+# 底栏单次点击后等待目标 Activity 的总预算，期间不补点
 BUY_RETRY_TIMEOUT = 3.5
 
 
@@ -95,8 +92,8 @@ class DamaiBot:
         self._started_at = None
         # 开售前 dump 一次底栏位置并缓存，放行瞬间只剩 1 次 adb tap
         self._buy_point = None
-        # 渲染稳定检测器在开抢前创建好（u2 探活约 0.9s，不能放进关键路径）
-        self._stable_wait = None
+        # 持续模板流贯穿详情页、票档页和确认页，结束后统一关闭
+        self._page_watch = None
         # 常驻 adb shell 会话：None=未尝试，False=不可用，对象=可用
         self._adb_session = None
 
@@ -199,21 +196,31 @@ class DamaiBot:
         self._adb_tap(*point)
         print(f"已点击底栏坐标 {point}")
 
-    def _wait_any_activity(self, markers, deadline):
+    def _wait_purchase_activity(self, markers, allowed, timeout):
+        """等目标页面；暂空继续等，其他非空 Activity 立即终止。"""
+        deadline = time.perf_counter() + timeout
+        started = time.perf_counter()
         while time.perf_counter() < deadline:
             activity = self._foreground_activity()
             for marker in markers:
                 if marker in activity:
+                    print(f"页面跳转：{marker}（等待 {time.perf_counter() - started:.3f} 秒）")
                     return marker
+            if activity and not any(marker in activity for marker in allowed):
+                raise RuntimeError(f"进入非预期页面：{activity}；停止点击")
             time.sleep(0.02)
-        return ""
+        raise TimeoutError(f"等待页面 {'/'.join(markers)} 超时；未重复点击")
 
-    def _wait_activity_gone(self, marker, deadline):
-        while time.perf_counter() < deadline:
-            if marker not in self._foreground_activity():
-                return True
-            time.sleep(0.05)
-        return False
+    def _wait_button_template(self, name, activity_marker, timeout=3.0):
+        if self._page_watch is None:
+            raise RuntimeError("模板视频流不可用；停止点击")
+        if not self._page_watch.wait_template(name, timeout):
+            raise TimeoutError(f"等待 {name} 按钮模板超时；未重复点击")
+        activity = self._foreground_activity()
+        if activity_marker not in activity:
+            raise RuntimeError(
+                f"{name} 模板命中时页面已变为 {activity or '未知'}；停止点击"
+            )
 
     def _resolve_point(self, raw, ratio):
         """配置里写了 x,y 就用配置，否则按屏幕比例换算。"""
@@ -570,7 +577,9 @@ class DamaiBot:
                 focus_point=self._buy_point,
                 screen_size=(width, height),
                 template_dir=getattr(self.config, "flip_template_dir", "") or None,
+                required_templates=("buy", "confirm", "submit"),
             )
+            self._page_watch = watch
         except Exception as exc:
             raise SaleTimeError(f"Scrcpy 模板感知不可用：{exc}；未点击") from exc
 
@@ -597,102 +606,61 @@ class DamaiBot:
             released_monotonic=released_monotonic,
         )
 
-    def _tap_buy_bar_until_next_page(self, point):
-        """正面确认可购买后点击底栏，直到离开详情页。
-
-        重试覆盖点击后页面未响应；若仍误入“已预约”等页面，先退回详情页。
-        返回翻页后的 Activity 名。
-        """
-        deadline = time.perf_counter() + BUY_RETRY_TIMEOUT
-        attempts = 0
-        while time.perf_counter() < deadline:
-            attempts += 1
-            self._adb_tap(*point)
-            if attempts == 1:
-                print(f"已点击底栏坐标 {point}")
-                self._mark("点击底栏完成")
-            else:
-                print(f"底栏未翻页，第 {attempts} 次点击")
-            wait_until = time.perf_counter() + (
-                BUY_FIRST_WAIT if attempts == 1 else BUY_RETRY_WAIT
-            )
-            while time.perf_counter() < wait_until:
-                activity = self._foreground_activity()
-                if "NcovSkuActivity" in activity or "DmOrderActivity" in activity:
-                    if attempts > 1:
-                        print(f"底栏点击 {attempts} 次后翻页")
-                    return activity
-                if "ProjectDetailActivity" not in activity:
-                    print(f"前台是 {activity or '未知'}，先返回详情页")
-                    self._adb("input", "keyevent", "4")
-                    time.sleep(0.4)
-                    break
-                time.sleep(0.02)
-        raise TimeoutError(
-            f"点击底栏 {attempts} 次仍未进入下单流程"
-            "（大麦按钮可能延迟翻转，或场次已售罄）"
-        )
-
-    def _make_stable_waiter(self):
-        """构建底栏渲染稳定检测；不可用返回 None（退回固定余量）。"""
-        try:
-            from flip_watch import make_strip_stable_waiter
-
-            name, wait = make_strip_stable_waiter(self.config.device_name)
-            print(f"页面就绪检测：{name}")
-            return wait
-        except Exception as exc:
-            print(f"页面就绪检测不可用（{exc}），退回固定等待")
-            return None
-
-    def _wait_page_ready(self, stable_wait, label):
-        """等页面底栏渲染稳定再盲点坐标；检测不可用时退回固定余量。"""
-        if stable_wait is not None:
-            try:
-                if stable_wait(1.2):
-                    print(f"{label}渲染已稳定，开始点击")
-                    return
-                print(f"{label}稳定检测超时，按固定余量继续点击")
-            except Exception as exc:
-                print(f"{label}稳定检测异常（{exc}），按固定余量继续点击")
-        time.sleep(0.15)
-
     def _run_fast(self):
-        """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
-        """极速模式：底栏 → 确定 → 立即提交，全程只发点击，不读页面、不做 OCR 兜底。"""
-        print("极速模式：按坐标直点（不 dump、不 OCR）")
+        """目标 Activity＋模板驱动，每个按钮只点击一次。"""
+        print("极速模式：模板驱动，每个按钮只点击一次（不 dump、不 OCR）")
         self._ensure_detail_page()
-        stable_wait = self._stable_wait or self._make_stable_waiter()
-        marker = self._tap_buy_bar_until_next_page(self._buy_bar_point())
+        if self._page_watch is None:
+            raise RuntimeError("模板视频流不可用；停止点击")
+        confirm = self._resolve_point(self.config.confirm_point, CONFIRM_POINT_RATIO)
+        submit = self._resolve_point(self.config.submit_point, SUBMIT_POINT_RATIO)
+        self._page_watch.set_focus_point("confirm", confirm)
+        self._page_watch.set_focus_point("submit", submit)
+
+        buy = self._buy_bar_point()
+        self._adb_tap(*buy)
+        print(f"已点击底栏坐标 {buy}（仅一次）")
+        self._mark("点击底栏完成")
+        marker = self._wait_purchase_activity(
+            ("NcovSkuActivity", "DmOrderActivity"),
+            ("ProjectDetailActivity",),
+            BUY_RETRY_TIMEOUT,
+        )
         if "NcovSkuActivity" in marker:
-            self._wait_page_ready(stable_wait, "票档页")
-            point = self._resolve_point(self.config.confirm_point, CONFIRM_POINT_RATIO)
-            self._adb_tap(*point)
-            print(f"点击“确定” {point}")
+            self._wait_button_template("confirm", "NcovSkuActivity")
+            self._adb_tap(*confirm)
+            print(f"点击“确定” {confirm}（仅一次）")
             self._mark("点击确定")
-            marker = self._wait_any_activity(("DmOrderActivity",), time.perf_counter() + 3.0)
-            if not marker:
-                raise RuntimeError(
-                    "“确定”点击后 3 秒仍未进入确认页：请确认大麦预约已预选场次/票档/观演人，"
-                    "或核对「确定」坐标配置；极速模式不做 OCR 兜底，直接结束"
-                )
+            marker = self._wait_purchase_activity(
+                ("DmOrderActivity",), ("NcovSkuActivity",), 3.0
+            )
         if marker != "DmOrderActivity":
             raise TimeoutError("没有进入订单确认页")
+
+        self._wait_button_template("submit", "DmOrderActivity")
         if not self.config.if_commit_order:
-            print("已到确认页（极速模式不读页面）；自动提交已关闭")
+            print("确认页模板已就绪；自动提交已关闭")
             return True
-        self._wait_page_ready(stable_wait, "确认页")
-        submit = self._resolve_point(self.config.submit_point, SUBMIT_POINT_RATIO)
-        for attempt in range(2):
-            self._submit_attempted = True
-            self._adb_tap(*submit)
-            print(f"点击“立即提交”（第 {attempt + 1} 次）{submit}")
-            self._mark("点击立即提交")
-            # 0.8 秒内活动页没离开就立即补点，把最坏情况从 2.6s 压到 ~1.2s
-            if self._wait_activity_gone("DmOrderActivity", time.perf_counter() + 0.8):
-                break
-        print(f"提交完成，全链路耗时：{time.perf_counter() - self._started_at:.2f} 秒")
+        if self._submit_attempted:
+            print("本次会话已尝试提交，禁止重复提交")
+            return False
+        self._submit_attempted = True
+        self._adb_tap(*submit)
+        print(f"点击“立即提交”（仅一次）{submit}")
+        self._mark("点击立即提交")
+        print(
+            "提交指令已发出，订单状态以大麦 App 为准；"
+            f"全链路耗时：{time.perf_counter() - self._started_at:.2f} 秒"
+        )
         return True
+
+    def _close_page_watch(self):
+        watch, self._page_watch = self._page_watch, None
+        if watch is not None:
+            try:
+                watch.close()
+            except Exception as exc:
+                print(f"关闭模板视频流失败：{exc}")
 
     def run_ticket_grabbing(self):
         """执行一次预约快路；任何结果不明确都停止，不自动重试。"""
@@ -704,8 +672,6 @@ class DamaiBot:
             self._prepare_buy_point()
             self._align_clock_with_phone()
             if self.config.fast_mode:
-                # 就绪检测器提前建好：u2 连接探活约 0.9s，开售瞬间直接用
-                self._stable_wait = self._make_stable_waiter()
                 release = self._wait_for_sale_with_flip_watch()
             else:
                 release = self._wait_for_sale()
@@ -759,6 +725,8 @@ class DamaiBot:
         except Exception as exc:
             print(f"预约快路中止：{exc}；不会自动重试或重复提交")
             return False
+        finally:
+            self._close_page_watch()
 
     def run_with_retry(self, max_retries=1):
         """兼容旧入口；预约快路始终只执行一次。"""

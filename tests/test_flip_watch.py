@@ -161,7 +161,7 @@ def test_missing_template_stops_before_sale(frozen, mocker):
     bot = make_bot([TARGET - timedelta(seconds=2)])
     mocker.patch(
         "flip_watch.make_scrcpy_watcher",
-        side_effect=FlipWatchError("未找到可购买按钮模板"),
+        side_effect=FlipWatchError("缺少按钮模板"),
     )
 
     with pytest.raises(SaleTimeError, match="未点击"):
@@ -309,6 +309,70 @@ def test_pixel_change_without_positive_template_never_releases(mocker, tmp_path)
 def test_missing_template_file_rejects_before_starting_stream(mocker, tmp_path):
     stream = mocker.patch("scrcpy_stream.ScrcpyStream")
 
-    with pytest.raises(FlipWatchError, match="未找到可购买按钮模板"):
+    with pytest.raises(FlipWatchError, match="缺少按钮模板"):
         flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
+    stream.assert_not_called()
+
+
+def test_full_flow_requires_all_three_templates(mocker, tmp_path):
+    write_template(tmp_path)
+    stream = mocker.patch("scrcpy_stream.ScrcpyStream")
+
+    with pytest.raises(FlipWatchError, match="confirm, submit"):
+        flip_watch.make_scrcpy_watcher(
+            "fake",
+            template_dir=tmp_path,
+            required_templates=("buy", "confirm", "submit"),
+        )
+    stream.assert_not_called()
+
+
+def test_first_template_hit_does_not_close_stream(mocker, tmp_path):
+    write_template(tmp_path)
+    instances = []
+
+    class FakeStream:
+        def __init__(self, _device):
+            self.stopped = False
+            instances.append(self)
+
+        def start(self):
+            pass
+
+        def read_latest(self):
+            import numpy as np
+
+            return np.zeros((120, 120, 3), dtype=np.uint8)
+
+        def stop(self):
+            self.stopped = True
+
+    mocker.patch("scrcpy_stream.ScrcpyStream", FakeStream)
+    mocker.patch.object(flip_watch, "_scrcpy_template_hit", return_value=True)
+    _, watcher = flip_watch.make_scrcpy_watcher("fake", template_dir=tmp_path)
+
+    assert watcher(1.0) is True
+    assert instances[0].stopped is False
+    watcher.close()
+    assert instances[0].stopped is True
+
+
+def test_full_flow_rejects_changed_screen_size(mocker, tmp_path):
+    for name in ("buy", "confirm", "submit"):
+        write_template(tmp_path)
+        if name != "buy":
+            (tmp_path / "buy.png").rename(tmp_path / f"{name}.png")
+    write_template(tmp_path)
+    (tmp_path / "screens.json").write_text(
+        '{"buy":[1220,2712],"confirm":[1220,2712],"submit":[1080,2412]}'
+    )
+    stream = mocker.patch("scrcpy_stream.ScrcpyStream")
+
+    with pytest.raises(FlipWatchError, match="重新校准"):
+        flip_watch.make_scrcpy_watcher(
+            "fake",
+            screen_size=(1220, 2712),
+            template_dir=tmp_path,
+            required_templates=("buy", "confirm", "submit"),
+        )
     stream.assert_not_called()

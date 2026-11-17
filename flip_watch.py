@@ -8,6 +8,7 @@ OCR，也不把像素变化、“已预约”或未知画面当作放行信号�
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import time
@@ -218,49 +219,59 @@ def _scrcpy_template_hit(crop, templates, cv2):
     return False
 
 
-def make_scrcpy_watcher(
-    device: str,
-    focus_point=None,
-    screen_size=None,
-    template_dir=None,
-):
-    """持续接收 Scrcpy 最新帧，只接受购买按钮正面模板命中。"""
+def _validate_template_screens(directory, required, screen_size):
+    if len(required) <= 1:
+        return
+    path = Path(directory) / "screens.json"
     try:
-        import cv2
-        from scrcpy_stream import ScrcpyError, ScrcpyStream
-    except ImportError as exc:
-        raise FlipWatchError(f"Scrcpy 运行依赖不可用：{exc}") from exc
+        screens = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FlipWatchError("缺少模板屏幕尺寸信息，请重新校准三个页面") from exc
+    for name in required:
+        if screens.get(name) != list(screen_size):
+            raise FlipWatchError(
+                f"{name} 模板采集于 {screens.get(name)}，当前屏幕为 "
+                f"{list(screen_size)}；请重新校准"
+            )
 
-    templates = _load_scrcpy_templates(cv2, template_dir)
-    if not templates:
-        directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
-        raise FlipWatchError(
-            f"未找到可购买按钮模板：{directory}；请先校准可购买详情页"
-        )
 
-    stream = ScrcpyStream(device)
-    try:
-        stream.start()
-    except (ScrcpyError, OSError) as exc:
-        stream.stop()
-        raise FlipWatchError(str(exc)) from exc
+class ScrcpyTemplateWatcher:
+    def __init__(self, stream, templates, cv2, focus_point, screen_size):
+        self._stream = stream
+        self._templates = templates
+        self._cv2 = cv2
+        self._screen_size = screen_size
+        self._focus_points = {"buy": focus_point}
+        self._previous = None
 
-    def watch(remaining: float) -> bool:
+    def set_focus_point(self, name, point):
+        self._focus_points[name] = point
+
+    def __call__(self, remaining: float) -> bool:
+        return self.wait_template("buy", remaining)
+
+    def wait_template(self, name: str, remaining: float) -> bool:
+        if name not in self._templates:
+            raise FlipWatchError(f"未加载按钮模板：{name}")
         deadline = time.monotonic() + max(remaining, 0.0)
-        previous = None
+        started = time.perf_counter()
         try:
             while time.monotonic() < deadline:
-                frame = stream.read_latest()
+                frame = self._stream.read_latest()
                 if frame is None:
                     time.sleep(0.005)
                     continue
-                crop = _scrcpy_crop(frame, focus_point, screen_size)
-                small = _small_gray(crop, cv2)
-                changed = previous is None or float(
-                    cv2.absdiff(small, previous).mean()
+                crop = _scrcpy_crop(
+                    frame, self._focus_points.get(name), self._screen_size
+                )
+                small = _small_gray(crop, self._cv2)
+                changed = self._previous is None or float(
+                    self._cv2.absdiff(small, self._previous).mean()
                 ) >= SCRCPY_DIFF_THRESHOLD
-                previous = small
-                if changed and _scrcpy_template_hit(crop, templates, cv2):
+                self._previous = small
+                template = [(name, self._templates[name])]
+                if changed and _scrcpy_template_hit(crop, template, self._cv2):
+                    print(f"模板命中：{name}（等待 {time.perf_counter() - started:.3f} 秒）")
                     return True
             return False
         except Exception as exc:
@@ -269,10 +280,43 @@ def make_scrcpy_watcher(
             raise FlipWatchError(
                 f"Scrcpy 视频感知失败（{type(exc).__name__}: {exc}）"
             ) from exc
-        finally:
-            stream.stop()
 
-    return "Scrcpy 实时帧+按钮模板（无 OCR）", watch
+    def close(self):
+        self._stream.stop()
+
+
+def make_scrcpy_watcher(
+    device: str,
+    focus_point=None,
+    screen_size=None,
+    template_dir=None,
+    required_templates=("buy",),
+):
+    """启动持续模板流；调用方负责在整条流程结束后 close。"""
+    try:
+        import cv2
+        from scrcpy_stream import ScrcpyError, ScrcpyStream
+    except ImportError as exc:
+        raise FlipWatchError(f"Scrcpy 运行依赖不可用：{exc}") from exc
+
+    directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
+    templates = dict(_load_scrcpy_templates(cv2, directory))
+    missing = [name for name in required_templates if name not in templates]
+    if missing:
+        raise FlipWatchError(
+            f"缺少按钮模板 {', '.join(missing)}：{directory}；请依次校准三个页面"
+        )
+    _validate_template_screens(directory, required_templates, screen_size)
+
+    stream = ScrcpyStream(device)
+    try:
+        stream.start()
+    except (ScrcpyError, OSError) as exc:
+        stream.stop()
+        raise FlipWatchError(str(exc)) from exc
+
+    watcher = ScrcpyTemplateWatcher(stream, templates, cv2, focus_point, screen_size)
+    return "Scrcpy 实时帧+按钮模板（无 OCR）", watcher
 
 
 def make_flip_watcher(device: str, ocr_tool=None):

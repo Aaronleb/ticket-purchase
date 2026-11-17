@@ -1,12 +1,13 @@
 # -*- coding: UTF-8 -*-
-"""开抢前采集按钮坐标和可购买按钮正面模板。
+"""开抢前采集按钮坐标和三页正面模板。
 
 识别手机当前停在哪个页面（详情页 / 选票档页 / 确认页），截图 OCR 找到
-对应按钮文字的实测中心点，写回配置对应字段。详情页只有正面识别到可购买
-文案才保存无 OCR 模板；通过容器坐标兜底时不会把“已预约”保存为放行模板。
+对应按钮文字的实测中心点，写回配置对应字段。只有正面识别到当前页目标
+按钮才保存对应模板；容器坐标兜底不会把“已预约”保存为放行模板。
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tempfile
@@ -91,7 +92,14 @@ def _dump_buy_bar_center(device: str) -> tuple[int, int] | None:
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
-def _save_buy_template(image_path: str, point, template_dir) -> str:
+TEMPLATE_FIELDS = {
+    "buy_point": "buy",
+    "confirm_point": "confirm",
+    "submit_point": "submit",
+}
+
+
+def _save_button_template(image_path: str, point, template_dir, name: str) -> str:
     from PIL import Image
 
     directory = Path(template_dir)
@@ -107,8 +115,17 @@ def _save_buy_template(image_path: str, point, template_dir) -> str:
             min(image.height, point[1] + half_height),
         )
     )
-    destination = directory / "buy.png"
+    destination = directory / f"{name}.png"
     crop.save(destination, format="PNG")
+    metadata_path = directory / "screens.json"
+    try:
+        screens = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        screens = {}
+    screens[name] = [image.width, image.height]
+    metadata_path.write_text(
+        json.dumps(screens, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return str(destination)
 
 
@@ -153,6 +170,8 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
         "point": f"{point[0]},{point[1]}",
         "activity": activity,
     }
-    if field == "buy_point" and text_confirmed and template_dir:
-        result["template_path"] = _save_buy_template(image_path, point, template_dir)
+    if text_confirmed and template_dir:
+        result["template_path"] = _save_button_template(
+            image_path, point, template_dir, TEMPLATE_FIELDS[field]
+        )
     return result

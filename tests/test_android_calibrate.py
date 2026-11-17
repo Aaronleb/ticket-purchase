@@ -74,10 +74,46 @@ def test_saved_template_is_grayscale_button_crop(tmp_path):
     image_path = tmp_path / "screen.png"
     image_path.write_bytes(png_bytes())
 
-    destination = android_calibrate._save_buy_template(
-        str(image_path), (500, 1800), tmp_path / "templates"
+    destination = android_calibrate._save_button_template(
+        str(image_path), (500, 1800), tmp_path / "templates", "buy"
     )
 
     template = Image.open(destination)
     assert template.mode == "L"
     assert template.size == (360, 140)
+
+
+def test_confirm_and_submit_pages_save_their_own_templates(mocker, tmp_path):
+    cases = (
+        ("cn.damai/.NcovSkuActivity", "确定", "confirm"),
+        ("cn.damai/.DmOrderActivity", "立即提交", "submit"),
+    )
+    for activity, text, name in cases:
+        mock_capture(mocker, tmp_path)
+        mocker.patch.object(
+            android_calibrate, "_foreground_activity", return_value=activity
+        )
+        mocker.patch.object(
+            android_calibrate, "_ocr_rows", return_value=[(500, 1800, text)]
+        )
+        templates = tmp_path / f"templates-{name}"
+
+        result = android_calibrate.calibrate_android_point(
+            "fake", template_dir=templates
+        )
+
+        assert result["template_path"] == str(templates / f"{name}.png")
+        assert (templates / f"{name}.png").is_file()
+
+
+def test_template_screen_size_is_saved(tmp_path):
+    import json
+
+    image_path = tmp_path / "screen.png"
+    image_path.write_bytes(png_bytes())
+    android_calibrate._save_button_template(
+        str(image_path), (500, 1800), tmp_path / "templates", "confirm"
+    )
+
+    screens = json.loads((tmp_path / "templates" / "screens.json").read_text())
+    assert screens["confirm"] == [1000, 2000]
