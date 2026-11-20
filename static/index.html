@@ -115,8 +115,11 @@
             <label class="field"><span>「确定」坐标</span><input id="android-confirm-point" type="text" placeholder="例如 843,2315" autocomplete="off"></label>
             <label class="field"><span>「立即提交」坐标</span><input id="android-submit-point" type="text" placeholder="例如 788,2319" autocomplete="off"></label>
           </div>
-          <button id="android-calibrate" class="button button-outline" type="button">采集当前页按钮坐标</button>
-          <p id="android-calibrate-hint" class="field-hint">把大麦依次停在详情页 → 选票档页 → 确认页，每页点一次本按钮，即可自动识别按钮位置并写入上方坐标（顺带完成 OCR 预热）。</p>
+          <div class="calibrate-actions">
+            <button id="android-calibrate" class="button button-outline" type="button">采集当前页按钮坐标</button>
+            <button id="android-calibrate-negative" class="button button-outline" type="button">采集「已预约」模板</button>
+          </div>
+          <p id="android-calibrate-hint" class="field-hint">把大麦依次停在详情页 → 选票档页 → 确认页，每页点一次「采集当前页按钮坐标」；在显示「已预约/未开售」的详情页点「采集『已预约』模板」，可保存负向模板防止开售后误点。</p>
         </details>
 
         <div class="form-footer">

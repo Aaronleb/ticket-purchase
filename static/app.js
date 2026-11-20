@@ -455,7 +455,6 @@ $("#android-time-sync").addEventListener("click", checkTimeSync);
 async function calibrateAndroidPoint() {
   const button = $("#android-calibrate");
   const hint = $("#android-calibrate-hint");
-  const defaultHint = hint.textContent;
   button.disabled = true;
   button.textContent = "识别中…";
   hint.textContent = "正在截图识别当前页面按钮…（首次约 5 秒，为 OCR 预热）";
@@ -468,7 +467,7 @@ async function calibrateAndroidPoint() {
     hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。${result.template_path ? " 已保存无 OCR 购买按钮模板。" : ""}${result.warning ? ` ${result.warning}` : ""}`;
     toast(`已采集「${result.button}」坐标 ${result.point}`);
   } catch (error) {
-    hint.textContent = `${error.message}（${defaultHint}）`;
+    hint.textContent = error.message;
     toast(error.message, true);
   } finally {
     button.disabled = false;
@@ -476,6 +475,31 @@ async function calibrateAndroidPoint() {
   }
 }
 $("#android-calibrate").addEventListener("click", calibrateAndroidPoint);
+
+async function calibrateNegativeTemplate() {
+  const button = $("#android-calibrate-negative");
+  const hint = $("#android-calibrate-hint");
+  button.disabled = true;
+  button.textContent = "识别中…";
+  hint.textContent = "正在识别「已预约 / 未开售」按钮并保存负向模板…";
+  try {
+    const result = await api("/api/android/calibrate-negative", {
+      method: "POST",
+      body: JSON.stringify(readAndroidConfig()),
+    });
+    fillAndroidConfig(result.config);
+    const name = String(result.template_path || "").split(/[\\/]/).pop();
+    hint.textContent = `已在「${result.page}」识别到「${result.button}」，负向模板 ${name} 已保存；开售后命中该模板会继续等待，不会误点。`;
+    toast(`已保存负向模板 ${name}`);
+  } catch (error) {
+    hint.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "采集「已预约」模板";
+  }
+}
+$("#android-calibrate-negative").addEventListener("click", calibrateNegativeTemplate);
 
 $("#config-form").addEventListener("submit", async (event) => {
   event.preventDefault();

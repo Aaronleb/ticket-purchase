@@ -2,6 +2,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
 from PIL import Image
 
 import android_calibrate
@@ -91,3 +92,67 @@ def test_dim_template_warns_about_presale_button(tmp_path):
     bright = tmp_path / "bright.png"
     Image.new("L", (100, 40), 240).save(bright)
     assert android_calibrate._template_warning(str(bright)) == ""
+
+
+def test_negative_text_saves_negative_template(mocker, tmp_path):
+    mock_capture(mocker, tmp_path)
+    mocker.patch.object(
+        android_calibrate,
+        "_ocr_rows",
+        return_value=[(500, 1800, "已预约")],
+    )
+    templates = tmp_path / "templates"
+
+    result = android_calibrate.calibrate_negative_point(
+        "fake", template_dir=templates
+    )
+
+    destination = templates / "negative-yuyue.png"
+    assert result["template_path"] == str(destination)
+    assert result["button"] == "已预约"
+    assert destination.is_file()
+    template = Image.open(destination)
+    assert template.mode == "L"
+    assert template.size == (360, 140)
+
+
+def test_negative_template_name_follows_matched_text(mocker, tmp_path):
+    mock_capture(mocker, tmp_path)
+    mocker.patch.object(
+        android_calibrate,
+        "_ocr_rows",
+        return_value=[(500, 1800, "未开售")],
+    )
+    templates = tmp_path / "templates"
+
+    result = android_calibrate.calibrate_negative_point(
+        "fake", template_dir=templates
+    )
+
+    assert result["template_path"] == str(templates / "negative-weikaisou.png")
+    assert (templates / "negative-weikaisou.png").is_file()
+
+
+def test_negative_requires_presale_text(mocker, tmp_path):
+    mock_capture(mocker, tmp_path)
+    mocker.patch.object(android_calibrate, "_ocr_rows", return_value=[])
+
+    with pytest.raises(android_calibrate.ConfigError, match="已预约"):
+        android_calibrate.calibrate_negative_point(
+            "fake", template_dir=tmp_path / "templates"
+        )
+    assert not (tmp_path / "templates").exists()
+
+
+def test_negative_requires_detail_page(mocker, tmp_path):
+    mock_capture(mocker, tmp_path)
+    mocker.patch.object(
+        android_calibrate,
+        "_foreground_activity",
+        return_value="cn.damai/.NcovSkuActivity",
+    )
+
+    with pytest.raises(android_calibrate.ConfigError, match="详情页"):
+        android_calibrate.calibrate_negative_point(
+            "fake", template_dir=tmp_path / "templates"
+        )

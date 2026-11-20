@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from android_calibrate import calibrate_android_point
+from android_calibrate import calibrate_android_point, calibrate_negative_point
 from android_config import AndroidConfigStore
 from android_diagnostics import AndroidDiagnostics
 from time_sync import measure_time_sync
@@ -104,11 +104,10 @@ class WebApplication:
     def check_android(self):
         return self.android_environment.check(self.android_store.load())
 
-    def calibrate_android(self, payload=None):
-        """识别手机当前页面，把对应按钮坐标写回配置。
+    def _android_config_with_form(self, payload=None):
+        """页面表单可能还没保存；把表单里的业务字段合并进配置。
 
-        页面表单可能还没保存；先把表单里的业务字段合并进来，
-        避免校准把未保存的购票数量/观演人等覆盖成旧值。
+        避免校准/采集模板时把未保存的购票数量、观演人等覆盖成旧值。
         """
         config = self.android_store.load()
         if isinstance(payload, dict):
@@ -121,9 +120,18 @@ class WebApplication:
                 "keyword",
                 "fast_mode",
                 "auto_select",
+                "buy_point",
+                "confirm_point",
+                "submit_point",
+                "flip_template_dir",
             ):
                 if field in payload:
                     config[field] = payload[field]
+        return config
+
+    def calibrate_android(self, payload=None):
+        """识别手机当前页面，把对应按钮坐标写回配置。"""
+        config = self._android_config_with_form(payload)
         template_dir = self.android_store.config_path.parent / "flip-templates"
         result = calibrate_android_point(
             config.get("device_name", ""), template_dir=template_dir
@@ -131,6 +139,17 @@ class WebApplication:
         config[result["field"]] = result["point"]
         if result.get("template_path"):
             config["flip_template_dir"] = str(template_dir)
+        result["config"] = self.android_store.save(config)
+        return result
+
+    def calibrate_negative(self, payload=None):
+        """采集“已预约/未开售”按钮的负向模板，命中时拒绝放行。"""
+        config = self._android_config_with_form(payload)
+        template_dir = self.android_store.config_path.parent / "flip-templates"
+        result = calibrate_negative_point(
+            config.get("device_name", ""), template_dir=template_dir
+        )
+        config["flip_template_dir"] = str(template_dir)
         result["config"] = self.android_store.save(config)
         return result
 
@@ -243,6 +262,13 @@ class Handler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ConfigError("请求不是有效的 JSON") from exc
 
+    def _optional_json(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        return self._read_json() if length > 0 else None
+
     def _dispatch(self, method: str) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
@@ -282,12 +308,9 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "POST" and path == "/api/android/check":
                 self._json(200, app.check_android())
             elif method == "POST" and path == "/api/android/calibrate":
-                try:
-                    length = int(self.headers.get("Content-Length", "0") or 0)
-                except ValueError:
-                    length = 0
-                payload = self._read_json() if length > 0 else None
-                self._json(200, app.calibrate_android(payload))
+                self._json(200, app.calibrate_android(self._optional_json()))
+            elif method == "POST" and path == "/api/android/calibrate-negative":
+                self._json(200, app.calibrate_negative(self._optional_json()))
             elif method == "GET" and path == "/api/android/time-sync":
                 self._json(200, app.time_sync_android())
             elif method == "POST" and path == "/api/android/network-test":

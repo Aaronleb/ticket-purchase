@@ -458,3 +458,4 @@ dialog p:not(.section-number) { color: var(--muted); font-size: 13px; line-heigh
 .advanced-block > summary::after { content: "＋"; float: right; }
 .advanced-block[open] > summary::after { content: "－"; }
 .advanced-block .field-grid { padding-bottom: 14px; }
+.calibrate-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }

@@ -41,6 +41,17 @@ def _foreground_activity(device: str) -> str:
     return match.group(1) if match else ""
 
 
+# 负向模板：这些文案表示当前不可购买，命中后必须拒绝放行
+NEGATIVE_KEYWORDS = ("已预约", "未开售", "即将开抢", "即将开售", "已售罄")
+NEGATIVE_TEMPLATE_SLUGS = {
+    "已预约": "yuyue",
+    "未开售": "weikaisou",
+    "即将开抢": "jiangkaqiang",
+    "即将开售": "jiangkaishou",
+    "已售罄": "yishouqing",
+}
+
+
 _OCR_ENGINE = None
 
 
@@ -76,6 +87,30 @@ def _find_button(rows, keywords) -> tuple[int, int] | None:
     return None
 
 
+def _find_button_keyword(rows, keywords) -> str:
+    """返回实际命中的候选文字，用于给模板命名。"""
+    for keyword in keywords:
+        for _x, _y, text in rows:
+            if text == keyword or (len(keyword) > 2 and keyword in text):
+                return keyword
+    return ""
+
+
+def _capture_screen(device: str) -> str:
+    """截取手机当前屏幕，返回临时文件路径。"""
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+        image_path = handle.name
+    with open(image_path, "wb") as output:
+        capture = subprocess.run(
+            ["adb", "-s", device, "exec-out", "screencap", "-p"],
+            stdout=output,
+            timeout=30,
+        )
+    if capture.returncode != 0:
+        raise ConfigError("截图失败，请确认手机亮屏且 USB 调试正常")
+    return image_path
+
+
 def _dump_buy_bar_center(device: str) -> tuple[int, int] | None:
     """详情页底栏是无障碍容器，OCR 失败时可从页面结构里取中心。"""
     _adb(device, "shell", "uiautomator", "dump", "/sdcard/damai_calibrate.xml", timeout=30)
@@ -91,7 +126,7 @@ def _dump_buy_bar_center(device: str) -> tuple[int, int] | None:
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
-def _save_buy_template(image_path: str, point, template_dir) -> str:
+def _save_button_template(image_path: str, point, template_dir, filename: str) -> str:
     from PIL import Image
 
     directory = Path(template_dir)
@@ -107,9 +142,13 @@ def _save_buy_template(image_path: str, point, template_dir) -> str:
             min(image.height, point[1] + half_height),
         )
     )
-    destination = directory / "buy.png"
+    destination = directory / filename
     crop.save(destination, format="PNG")
     return str(destination)
+
+
+def _save_buy_template(image_path: str, point, template_dir) -> str:
+    return _save_button_template(image_path, point, template_dir, "buy.png")
 
 
 def _template_warning(template_path: str) -> str:
@@ -146,16 +185,7 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
         )
     _marker, field, page_name, button_name, keywords = page
 
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-        image_path = handle.name
-    with open(image_path, "wb") as output:
-        capture = subprocess.run(
-            ["adb", "-s", device, "exec-out", "screencap", "-p"],
-            stdout=output,
-            timeout=30,
-        )
-    if capture.returncode != 0:
-        raise ConfigError("截图失败，请确认手机亮屏且 USB 调试正常")
+    image_path = _capture_screen(device)
 
     rows = _ocr_rows(image_path)
     point = _find_button(rows, keywords)
@@ -180,3 +210,46 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
         if warning:
             result["warning"] = warning
     return result
+
+
+def calibrate_negative_point(device: str, template_dir=None) -> dict:
+    """在“已预约/未开售”的详情页采集负向模板。
+
+    负向模板只用于拒绝放行：开售后底栏命中这些模板时继续等待，
+    避免把仍不可购买的底栏当成可购买按钮点击。
+    """
+    if not device:
+        raise ConfigError("请先在配置里选择并保存设备名")
+    if not template_dir:
+        raise ConfigError("模板目录未配置，请先采集一次「立即购票」坐标")
+    activity = _foreground_activity(device)
+    if "ProjectDetailActivity" not in activity:
+        raise ConfigError(
+            f"当前页面（{activity or '未知'}）不是演出详情页，"
+            "请在大麦打开显示「已预约」或「未开售」的详情页后重试"
+        )
+
+    image_path = _capture_screen(device)
+    rows = _ocr_rows(image_path)
+    point = _find_button(rows, NEGATIVE_KEYWORDS)
+    if point is None:
+        raise ConfigError(
+            "没有识别到「已预约 / 未开售 / 即将开抢」等不可购买文案，"
+            "请确认详情页显示已预约状态后重试"
+        )
+    keyword = _find_button_keyword(rows, NEGATIVE_KEYWORDS)
+    slug = NEGATIVE_TEMPLATE_SLUGS.get(keyword, "template")
+    template_path = _save_button_template(
+        image_path,
+        point,
+        template_dir,
+        f"negative-{slug}.png",
+    )
+    return {
+        "field": "negative_template",
+        "page": "详情页",
+        "button": keyword,
+        "point": f"{point[0]},{point[1]}",
+        "activity": activity,
+        "template_path": template_path,
+    }

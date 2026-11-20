@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import create_server
+from config_store import ConfigError
 from test_android_config import valid_android_config
 
 
@@ -243,6 +244,50 @@ class AndroidApiTests(unittest.TestCase):
         self.assertEqual(saved["config"]["submit_point"], "941,2562")
         _, loaded = self.request("GET", "/api/android/config")
         self.assertEqual(loaded["ticket_count"], 2)
+
+    def test_android_negative_calibration_saves_template_without_touching_points(self):
+        self.request("PUT", "/api/android/config", valid_android_config())
+        expected_dir = (self.appium_dir / "flip-templates").resolve()
+        result = {
+            "field": "negative_template",
+            "page": "详情页",
+            "button": "已预约",
+            "point": "500,1800",
+            "activity": "ProjectDetailActivity",
+            "template_path": str(expected_dir / "negative-yuyue.png"),
+        }
+        payload = {
+            **valid_android_config(),
+            "ticket_count": 2,
+            "buy_point": "765,2556",
+        }
+        with patch(
+            "app.calibrate_negative_point", return_value=result
+        ) as calibrate:
+            status, saved = self.request(
+                "POST", "/api/android/calibrate-negative", payload
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["config"]["flip_template_dir"], str(expected_dir))
+        self.assertEqual(saved["config"]["ticket_count"], 2)
+        self.assertEqual(saved["config"]["buy_point"], "765,2556")
+        self.assertEqual(calibrate.call_args.args[0], payload["device_name"])
+        self.assertEqual(calibrate.call_args.kwargs["template_dir"], expected_dir)
+
+    def test_android_negative_calibration_requires_detail_page(self):
+        self.request("PUT", "/api/android/config", valid_android_config())
+        with patch(
+            "app.calibrate_negative_point",
+            side_effect=ConfigError("当前页面不是演出详情页"),
+        ):
+            status, error = self.request(
+                "POST",
+                "/api/android/calibrate-negative",
+                valid_android_config(),
+            )
+        self.assertEqual(status, 400)
+        self.assertIn("详情页", error["error"])
 
     def test_android_only_application_disables_pc_and_reports_runtime(self):
         packaged = create_server(
