@@ -54,6 +54,9 @@ def validate_android_config(payload) -> dict:
         raise ConfigError("安卓配置必须是 JSON 对象")
     config = dict(DEFAULT_ANDROID_CONFIG)
     config.update(payload)
+    # 演练模式只属于单次启动，不能写进配置文件
+    config.pop("dry_run", None)
+    config.pop("run_now", None)
 
     server_url = _required_string(config["server_url"], "Appium 地址").rstrip("/")
     parsed = urlparse(server_url)
@@ -136,6 +139,22 @@ class AndroidConfigStore:
         self.ensure_project()
         if self.managed_server_url and isinstance(payload, dict):
             payload = {**payload, "server_url": self.managed_server_url}
+        # 老页面/旧配置保存时可能不带已采集的坐标或模板目录，保留磁盘上已有的值
+        if isinstance(payload, dict):
+            try:
+                existing = json.loads(self.config_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = {}
+            if isinstance(existing, dict):
+                payload = dict(payload)
+                for field in (
+                    "flip_template_dir",
+                    "buy_point",
+                    "confirm_point",
+                    "submit_point",
+                ):
+                    if not str(payload.get(field) or "").strip() and existing.get(field):
+                        payload[field] = existing[field]
         config = validate_android_config(payload)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(

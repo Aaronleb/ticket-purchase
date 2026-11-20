@@ -189,6 +189,42 @@ def test_timeout_raises(mocker):
     shell.kill()
 
 
+def test_no_replay_on_timeout_for_taps(mocker):
+    """点击超时可能已经生效：replay=False 时只能发一次。"""
+    session = AdbShellSession("fake-device")
+    calls = []
+
+    def fake_transact(payload, timeout):
+        calls.append(payload)
+        raise TimeoutError("adb shell 超时")
+
+    mocker.patch.object(session, "_ensure")
+    mocker.patch.object(session, "_transact", side_effect=fake_transact)
+
+    with pytest.raises(AdbSessionError, match="连续失败"):
+        session.run(("shell", "input", "tap", "1", "2"), replay=False)
+
+    assert len(calls) == 1
+
+
+def test_query_commands_still_replay_on_timeout(mocker):
+    """查询类命令超时重放是安全的，保留一次重建重试。"""
+    session = AdbShellSession("fake-device")
+    calls = []
+
+    def fake_transact(payload, timeout):
+        calls.append(payload)
+        raise TimeoutError("adb shell 超时")
+
+    mocker.patch.object(session, "_ensure")
+    mocker.patch.object(session, "_transact", side_effect=fake_transact)
+
+    with pytest.raises(AdbSessionError, match="连续失败"):
+        session.run(("shell", "dumpsys", "activity"))
+
+    assert len(calls) == 2
+
+
 def test_repeated_runs_reuse_session(mocker):
     shell = FakeShell(
         script=[(f"echo-test-{i}", [f"r{i}"]) for i in range(3)]

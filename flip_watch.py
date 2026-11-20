@@ -271,16 +271,37 @@ def _save_auto_template_async(image, directory, cv2):
     threading.Thread(target=_write, daemon=True).start()
 
 
+NEGATIVE_TEMPLATE_PREFIX = "negative-"
+
+
 def _load_scrcpy_templates(cv2, template_dir=None):
+    """正面模板：只加载非 negative- 前缀的 PNG。"""
     directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
     if not directory.is_dir():
         return []
     templates = []
     for path in sorted(directory.glob("*.png")):
+        if path.stem.startswith(NEGATIVE_TEMPLATE_PREFIX):
+            continue
         image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
         if image is not None and image.size:
             templates.append((path.stem, image))
     return templates
+
+
+def _load_scrcpy_negatives(cv2, template_dir=None):
+    """负向模板：命中“已预约/未开售”时拒绝放行。"""
+    directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
+    if not directory.is_dir():
+        return []
+    negatives = []
+    for path in sorted(
+        directory.glob(f"{NEGATIVE_TEMPLATE_PREFIX}*.png")
+    ):
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if image is not None and image.size:
+            negatives.append((path.stem, image))
+    return negatives
 
 
 def _scrcpy_template_hit(crop, templates, cv2):
@@ -315,6 +336,7 @@ def make_scrcpy_watcher(
 
     template_root = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
     templates = _load_scrcpy_templates(cv2, template_dir)
+    negatives = _load_scrcpy_negatives(cv2, template_dir)
     if not templates:
         raise FlipWatchError(
             f"未找到可购买按钮模板：{template_root}；请先校准可购买详情页"
@@ -335,6 +357,7 @@ def make_scrcpy_watcher(
         baseline = None
         last_change_at = None
         dim_warned = False
+        negative_warned = False
         # 没有按钮坐标时无法确认翻转区域，不启用自动补采放行
         auto_capture = bool(focus_point and screen_size and all(screen_size))
         try:
@@ -362,6 +385,16 @@ def make_scrcpy_watcher(
                 previous = small
                 if changed:
                     last_change_at = now
+                if changed and negatives and _scrcpy_template_hit(
+                    crop, negatives, cv2
+                ):
+                    if not negative_warned:
+                        print(
+                            "模板命中，但底栏是“已预约/未开售”，"
+                            "继续等待翻转为“立即购买/立即购票”"
+                        )
+                        negative_warned = True
+                    continue
                 if changed and _scrcpy_template_hit(crop, templates, cv2):
                     if not _button_is_enabled(frame, focus_point, screen_size, cv2):
                         if not dim_warned:

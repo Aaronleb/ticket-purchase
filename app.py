@@ -8,15 +8,18 @@ import queue
 import sys
 import threading
 import webbrowser
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from android_calibrate import calibrate_android_point
 from android_config import AndroidConfigStore
+from android_diagnostics import AndroidDiagnostics
 from time_sync import measure_time_sync
 from android_environment import AndroidEnvironment
 from config_store import ConfigError, ConfigStore, default_project_root
+from damai_appium.sale_clock import SHANGHAI
 from process_manager import ProcessManager, TaskBusy, TaskError, TaskNotRunning
 
 
@@ -42,6 +45,7 @@ class WebApplication:
             managed_server_url=managed_server_url,
         )
         self.android_environment = AndroidEnvironment()
+        self.android_diagnostics = AndroidDiagnostics()
         self.manager = ProcessManager()
         self.android_only = android_only
         self.android_command = android_command
@@ -100,9 +104,26 @@ class WebApplication:
     def check_android(self):
         return self.android_environment.check(self.android_store.load())
 
-    def calibrate_android(self):
-        """识别手机当前页面，把对应按钮坐标写回配置。"""
+    def calibrate_android(self, payload=None):
+        """识别手机当前页面，把对应按钮坐标写回配置。
+
+        页面表单可能还没保存；先把表单里的业务字段合并进来，
+        避免校准把未保存的购票数量/观演人等覆盖成旧值。
+        """
         config = self.android_store.load()
+        if isinstance(payload, dict):
+            for field in (
+                "device_name",
+                "platform_version",
+                "ticket_count",
+                "users",
+                "price",
+                "keyword",
+                "fast_mode",
+                "auto_select",
+            ):
+                if field in payload:
+                    config[field] = payload[field]
         template_dir = self.android_store.config_path.parent / "flip-templates"
         result = calibrate_android_point(
             config.get("device_name", ""), template_dir=template_dir
@@ -118,10 +139,38 @@ class WebApplication:
         config = self.android_store.load()
         return measure_time_sync(config.get("device_name") or None)
 
+    def _diagnostic_device(self, payload) -> str:
+        device = str((payload or {}).get("device_name") or "").strip()
+        if not device:
+            raise ConfigError("请先在安卓配置里填写设备名")
+        return device
+
+    def network_test_android(self, payload):
+        """测试手机到 detail/mtop 的 RTT、抖动、丢包与 Wi-Fi 信号。"""
+        return self.android_diagnostics.network_report(
+            self._diagnostic_device(payload)
+        )
+
+    def performance_test_android(self, payload):
+        """读取手机内存、温度、动画、帧率与大麦进程状态。"""
+        return self.android_diagnostics.performance_report(
+            self._diagnostic_device(payload)
+        )
+
     def list_android_devices(self):
         return self.android_environment.list_devices()
 
-    def start_android(self, payload):
+    def start_android(self, payload, dry_run=False, run_now=False):
+        payload = dict(payload or {})
+        # dry_run / run_now 不写入配置文件：只通过环境变量传给本次 worker，
+        # 避免下一次正常启动意外继承演练模式。
+        dry_run = bool(payload.pop("dry_run", False) or dry_run)
+        run_now = bool(payload.pop("run_now", False) or run_now)
+        dry_run = dry_run or run_now
+        if run_now and not str(payload.get("sell_start_time") or "").strip():
+            payload["sell_start_time"] = (
+                datetime.now(SHANGHAI) + timedelta(minutes=1)
+            ).isoformat()
         config = self.android_store.save(payload)
         report = self.android_environment.check(config)
         if not report["ok"]:
@@ -132,10 +181,16 @@ class WebApplication:
             )
             raise ConfigError(f"安卓环境检查未通过：{failures}")
         command = self.android_command or [sys.executable, "damai_app_v2.py"]
+        env = None
+        if dry_run:
+            env = {"DAMAI_DRY_RUN": "1"}
+        if run_now:
+            env = {**(env or {}), "DAMAI_RUN_NOW": "1"}
         return self.manager.start(
             "android",
             command,
             self.android_store.config_path.parent,
+            env=env,
         )
 
 
@@ -227,9 +282,18 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "POST" and path == "/api/android/check":
                 self._json(200, app.check_android())
             elif method == "POST" and path == "/api/android/calibrate":
-                self._json(200, app.calibrate_android())
+                try:
+                    length = int(self.headers.get("Content-Length", "0") or 0)
+                except ValueError:
+                    length = 0
+                payload = self._read_json() if length > 0 else None
+                self._json(200, app.calibrate_android(payload))
             elif method == "GET" and path == "/api/android/time-sync":
                 self._json(200, app.time_sync_android())
+            elif method == "POST" and path == "/api/android/network-test":
+                self._json(200, app.network_test_android(self._read_json()))
+            elif method == "POST" and path == "/api/android/performance-test":
+                self._json(200, app.performance_test_android(self._read_json()))
             elif method == "POST" and path == "/api/login":
                 self._json(200, app.start_login())
             elif method == "POST" and path == "/api/login/complete":

@@ -75,6 +75,100 @@ class AndroidApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(actual, report)
 
+    def test_android_network_test_returns_report(self):
+        report = {
+            "ok": True,
+            "level": "pass",
+            "summary": "网络检查全部达标",
+            "metrics": [],
+            "advice": [],
+        }
+        with patch.object(
+            self.server.application.android_diagnostics,
+            "network_report",
+            return_value=report,
+        ) as network:
+            status, actual = self.request(
+                "POST", "/api/android/network-test", valid_android_config()
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(actual, report)
+        self.assertEqual(network.call_args.args[0], valid_android_config()["device_name"])
+
+    def test_android_performance_test_returns_report(self):
+        report = {
+            "ok": False,
+            "level": "warn",
+            "summary": "设备检查基本可用",
+            "metrics": [],
+            "advice": ["关闭系统动画"],
+        }
+        with patch.object(
+            self.server.application.android_diagnostics,
+            "performance_report",
+            return_value=report,
+        ) as performance:
+            status, actual = self.request(
+                "POST", "/api/android/performance-test", valid_android_config()
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(actual, report)
+        self.assertEqual(
+            performance.call_args.args[0], valid_android_config()["device_name"]
+        )
+
+    def test_android_dry_run_passes_env_without_persisting_flag(self):
+        report = {"ok": True, "checks": []}
+        with patch.object(
+            self.server.application.android_environment, "check", return_value=report
+        ), patch.object(
+            self.server.application.manager,
+            "start",
+            return_value={"phase": "grabbing", "task": "android"},
+        ) as start:
+            status, started = self.request(
+                "POST",
+                "/api/android/start",
+                {**valid_android_config(), "dry_run": True},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(started["phase"], "grabbing")
+        self.assertEqual(start.call_args.kwargs["env"], {"DAMAI_DRY_RUN": "1"})
+        _, loaded = self.request("GET", "/api/android/config")
+        self.assertNotIn("dry_run", loaded)
+
+    def test_android_run_now_passes_env_without_persisting_flag(self):
+        report = {"ok": True, "checks": []}
+        with patch.object(
+            self.server.application.android_environment, "check", return_value=report
+        ), patch.object(
+            self.server.application.manager,
+            "start",
+            return_value={"phase": "grabbing", "task": "android"},
+        ) as start:
+            status, started = self.request(
+                "POST",
+                "/api/android/start",
+                {**valid_android_config(), "run_now": True},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(started["phase"], "grabbing")
+        self.assertEqual(
+            start.call_args.kwargs["env"],
+            {"DAMAI_DRY_RUN": "1", "DAMAI_RUN_NOW": "1"},
+        )
+        _, loaded = self.request("GET", "/api/android/config")
+        self.assertNotIn("run_now", loaded)
+        self.assertNotIn("dry_run", loaded)
+
+    def test_android_diagnostics_require_device_name(self):
+        payload = {**valid_android_config(), "device_name": ""}
+        status, error = self.request("POST", "/api/android/network-test", payload)
+        self.assertEqual(status, 400)
+        self.assertIn("设备名", error["error"])
+
     def test_failed_environment_check_prevents_start(self):
         report = {
             "ok": False,
@@ -126,6 +220,29 @@ class AndroidApiTests(unittest.TestCase):
         self.assertEqual(calibrate.call_args.kwargs["template_dir"], expected_dir)
         _, loaded = self.request("GET", "/api/android/config")
         self.assertEqual(loaded["flip_template_dir"], str(expected_dir))
+
+    def test_android_calibration_merges_unsaved_form_fields(self):
+        self.request(
+            "PUT", "/api/android/config", {**valid_android_config(), "ticket_count": 1}
+        )
+        result = {
+            "field": "submit_point",
+            "page": "确认页",
+            "button": "立即提交",
+            "point": "941,2562",
+            "activity": "DmOrderActivity",
+        }
+        payload = {**valid_android_config(), "ticket_count": 2}
+        with patch("app.calibrate_android_point", return_value=result):
+            status, saved = self.request(
+                "POST", "/api/android/calibrate", payload
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["config"]["ticket_count"], 2)
+        self.assertEqual(saved["config"]["submit_point"], "941,2562")
+        _, loaded = self.request("GET", "/api/android/config")
+        self.assertEqual(loaded["ticket_count"], 2)
 
     def test_android_only_application_disables_pc_and_reports_runtime(self):
         packaged = create_server(

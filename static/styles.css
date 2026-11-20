@@ -191,6 +191,7 @@ h1 em { color: var(--blue); font-style: normal; }
 .form-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 26px; padding-top: 22px; border-top: 1px solid #ebebee; }
 .form-footer > span { color: var(--soft); font-size: 10px; }
 .form-footer .button { min-width: 112px; }
+.form-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 .side-stack { display: flex; flex-direction: column; gap: 18px; }
 .operation-card { padding: 28px; }
 .operation-card .card-heading h2 { font-size: 24px; }
@@ -216,6 +217,40 @@ h1 em { color: var(--blue); font-style: normal; }
 .android-check-results li.passed::before { background: var(--green); }
 .android-check-results li span { display: block; font-size: 10px; font-weight: 600; }
 .android-check-results li small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.diagnostics-results { margin-top: 16px; padding-top: 14px; border-top: 1px solid #ebebee; }
+.diagnostic-summary { display: block; margin-bottom: 10px; font-size: 11px; }
+.diagnostic-summary.level-pass { color: #248a3d; }
+.diagnostic-summary.level-warn { color: #a86400; }
+.diagnostic-summary.level-fail { color: var(--red-dark); }
+.diagnostic-list { margin: 0; padding: 0; display: grid; gap: 8px; list-style: none; }
+.diagnostic-item { padding: 8px 0; border-top: 1px solid #f0f0f2; }
+.diagnostic-item:first-child { border-top: 0; padding-top: 0; }
+.diagnostic-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.diagnostic-head strong { font-size: 10px; font-weight: 600; }
+.diagnostic-value { flex: 0 0 auto; font: 10px var(--mono); }
+.diagnostic-item small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.diagnostic-item.level-pass .diagnostic-value { color: #248a3d; }
+.diagnostic-item.level-warn .diagnostic-value { color: #a86400; }
+.diagnostic-item.level-fail .diagnostic-value { color: var(--red-dark); }
+.diagnostic-item.level-info .diagnostic-value { color: var(--muted); }
+.diagnostic-advice { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e5e5ea; }
+.diagnostic-advice > strong { display: block; margin-bottom: 6px; color: var(--soft); font-size: 9px; letter-spacing: .06em; }
+.diagnostic-advice ul { margin: 0; padding: 0 0 0 14px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.diagnostic-advice li { margin-bottom: 3px; }
+.timing-card { margin: 0 0 24px; padding: 28px 32px; }
+.timing-summary { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+.timing-summary strong { font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
+.timing-summary span { color: var(--soft); font: 9px var(--mono); }
+.timing-chain { margin: -4px 0 14px; padding: 8px 12px; border-radius: 8px; color: var(--muted); background: var(--paper); font-size: 9px; line-height: 1.5; }
+.timing-chain.warn { color: #a86400; background: #fff8e6; }
+.timing-rows { display: grid; gap: 10px; }
+.timing-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 62px; gap: 14px; align-items: center; }
+.timing-row strong { font-size: 10px; font-weight: 600; }
+.timing-bar { height: 8px; border-radius: 999px; background: #ececf0; overflow: hidden; }
+.timing-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0071e3, #64a8ff); }
+.timing-row em { font: 10px var(--mono); font-style: normal; color: var(--muted); text-align: right; }
+.timing-note { margin: 16px 0 0; color: var(--soft); font-size: 9px; line-height: 1.6; }
+.timing-empty { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
 .help-troubleshooting code { padding: 1px 4px; border-radius: 4px; background: var(--paper); font: 10px var(--mono); overflow-wrap: anywhere; }
 .mini-card { position: relative; padding: 20px 24px; overflow: hidden; }
 .mini-label { display: block; margin-bottom: 7px; color: var(--soft); font-size: 9px; }
@@ -284,6 +319,8 @@ dialog p:not(.section-number) { color: var(--muted); font-size: 13px; line-heigh
   .truth-note { margin-top: 0; }
   .button-large { min-width: 0; }
   .config-card, .operation-card { padding: 26px 22px; }
+  .timing-card { padding: 22px; }
+  .timing-row { grid-template-columns: 104px minmax(0, 1fr) 52px; gap: 9px; }
   .card-heading h2 { font-size: 24px; }
   .card-tag { display: none; }
   .field-grid { grid-template-columns: 1fr; }
@@ -291,6 +328,7 @@ dialog p:not(.section-number) { color: var(--muted); font-size: 13px; line-heigh
   .toggle-field { min-height: 66px; }
   .form-footer { align-items: stretch; flex-direction: column; }
   .form-footer .button { width: 100%; }
+  .form-actions { width: 100%; flex-direction: column-reverse; }
   .side-stack { grid-template-columns: 1fr; }
   .log-heading { min-height: 82px; padding: 20px 22px; }
   .log-tools > span { display: none; }
@@ -331,6 +369,7 @@ dialog p:not(.section-number) { color: var(--muted); font-size: 13px; line-heigh
   .truth-note { display: none; }
   .workspace { grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; padding: 0 0 18px; }
   .config-card { padding: 20px 24px; }
+  .timing-card { padding: 20px 24px; margin-bottom: 18px; }
   .card-heading, .card-heading.compact { margin-bottom: 16px; }
   .card-heading h2, .operation-card .card-heading h2 { font-size: 22px; }
   .section-number { margin-bottom: 5px; }

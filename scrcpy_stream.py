@@ -30,8 +30,9 @@ class ScrcpyStream:
         serial: str,
         *,
         server_path: Path | None = None,
+        # 保持原生分辨率和码率以稳定模板匹配，只降低帧率减少编码负载
         max_size: int = 1600,
-        max_fps: int = 30,
+        max_fps: int = 15,
         bitrate: int = 8_000_000,
         startup_timeout: float = 5.0,
     ):

@@ -485,6 +485,22 @@ def test_buy_button_crop_matches_calibration_ratio():
     assert crop.shape == (70, 180)
 
 
+def test_negative_templates_are_loaded_separately(tmp_path):
+    import cv2
+    import numpy as np
+
+    write_template(tmp_path)
+    negative = np.zeros((15, 60), dtype=np.uint8)
+    negative[3:12, 5:55] = 255
+    cv2.imwrite(str(tmp_path / "negative-yuyue.png"), negative)
+
+    positives = flip_watch._load_scrcpy_templates(cv2, tmp_path)
+    negatives = flip_watch._load_scrcpy_negatives(cv2, tmp_path)
+
+    assert [name for name, _ in positives] == ["buy"]
+    assert [name for name, _ in negatives] == ["negative-yuyue"]
+
+
 def test_missing_template_file_rejects_before_starting_stream(mocker, tmp_path):
     stream = mocker.patch("scrcpy_stream.ScrcpyStream")
 
@@ -550,7 +566,7 @@ def test_activity_drawn_uses_first_frame_flag(mocker):
 
 
 def test_fast_mode_retaps_confirm_when_first_tap_lost(mocker):
-    """“确定”首点被吞（首帧刚画完）时补点一次，而不是直接失败。"""
+    """预约模式：首次确定没反应时补点一次，不做 OCR 选票档。"""
     bot = DamaiBot.__new__(DamaiBot)
     bot.config = SimpleNamespace(
         confirm_point="950,2562",
@@ -564,7 +580,6 @@ def test_fast_mode_retaps_confirm_when_first_tap_lost(mocker):
     taps = []
     bot._adb_tap = lambda *point: taps.append(point)
     bot._wait_any_activity = Mock(side_effect=["", "DmOrderActivity"])
-    # 超时后仍停在票档页，才允许补点；确认页/切换中不能补
     bot._foreground_activity = Mock(return_value="cn.damai/.sku.NcovSkuActivity")
     bot._mark = Mock()
 

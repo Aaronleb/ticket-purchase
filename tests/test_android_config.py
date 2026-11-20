@@ -33,6 +33,13 @@ class AndroidConfigValidationTests(unittest.TestCase):
         self.assertEqual(config["users"], ["测试观演人"])
         self.assertEqual(config["sell_start_time"], "2026-11-13T20:00:00+08:00")
 
+    def test_dry_run_is_not_persisted(self):
+        config = validate_android_config(
+            {**valid_android_config(), "dry_run": True, "run_now": True}
+        )
+        self.assertNotIn("dry_run", config)
+        self.assertNotIn("run_now", config)
+
     def test_rejects_invalid_server_url(self):
         payload = valid_android_config()
         payload["server_url"] = "file:///tmp/appium"
@@ -89,6 +96,34 @@ class AndroidConfigStoreTests(unittest.TestCase):
         self.assertEqual(actual, expected)
         raw = json.loads((self.appium_dir / "config.jsonc").read_text(encoding="utf-8"))
         self.assertEqual(raw["device_name"], "emulator-5554")
+
+    def test_save_preserves_calibrated_points_when_payload_omits_them(self):
+        first = valid_android_config()
+        first.update(
+            {
+                "buy_point": "765,2556",
+                "confirm_point": "950,2562",
+                "submit_point": "941,2562",
+                "flip_template_dir": "/tmp/templates",
+            }
+        )
+        self.store.save(first)
+
+        second = valid_android_config()
+        second.update(
+            {
+                "buy_point": "",
+                "confirm_point": "",
+                "submit_point": "",
+                "flip_template_dir": "",
+            }
+        )
+        saved = self.store.save(second)
+
+        self.assertEqual(saved["buy_point"], "765,2556")
+        self.assertEqual(saved["confirm_point"], "950,2562")
+        self.assertEqual(saved["submit_point"], "941,2562")
+        self.assertEqual(saved["flip_template_dir"], "/tmp/templates")
 
     def test_missing_android_project_has_actionable_error(self):
         store = AndroidConfigStore(self.root / "missing")

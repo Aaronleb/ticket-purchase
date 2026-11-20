@@ -10,6 +10,7 @@ ocr_datas, ocr_binaries, ocr_hiddenimports = collect_all("rapidocr_onnxruntime")
 hiddenimports = [
     "damai_appium.config",
     "damai_appium.damai_app_v2",
+    "activity_watch",
     "flip_watch",
     "scrcpy_stream",
     "av",
