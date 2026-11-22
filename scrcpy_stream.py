@@ -30,9 +30,10 @@ class ScrcpyStream:
         serial: str,
         *,
         server_path: Path | None = None,
-        # 保持原生分辨率和码率以稳定模板匹配，只降低帧率减少编码负载
+        # 保持原生分辨率和码率以稳定模板匹配；30fps 把开售瞬间的帧间隔从
+        # 66ms 压到 33ms，代价是编码/解码 CPU 翻倍
         max_size: int = 1600,
-        max_fps: int = 15,
+        max_fps: int = 30,
         bitrate: int = 8_000_000,
         startup_timeout: float = 5.0,
     ):

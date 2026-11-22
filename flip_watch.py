@@ -166,6 +166,17 @@ SCRCPY_DIFF_THRESHOLD = 4.0
 SCRCPY_TEMPLATE_THRESHOLD = 0.86
 SCRCPY_TEMPLATE_DIR = Path(__file__).resolve().parent / "resources" / "flip-templates"
 
+# 票档页「确定」按钮的固定区域模板。底部栏左侧价格块宽度会随金额变化，
+# 只裁右侧固定的按钮框，价格从 480 变成 1280 也不影响模板。
+SKU_CONFIRM_PREFIX = "sku-confirm"
+SUBMIT_TEMPLATE_PREFIX = "sku-submit"
+# 采集模板时的裁剪半宽/半高（相对屏幕），只含按钮本体
+SKU_TEMPLATE_HALF_WIDTH = 0.19
+SKU_TEMPLATE_HALF_HEIGHT = 0.030
+# 运行时在该区域里搜模板，比模板本身略大，保证模板能被完整包含
+SKU_SEARCH_HALF_WIDTH = 0.22
+SKU_SEARCH_HALF_HEIGHT = 0.05
+
 # 可购买状态的底栏通常是有颜色的（大麦是橙红渐变），但部分页面“已预约”
 # 底栏也是橙色，所以着色只作辅助判断，不能单独放行。
 # 灰度模板只能证明“文字还在”，开售前后文字相同，所以再加一道着色判断：
@@ -271,11 +282,29 @@ def _save_auto_template_async(image, directory, cv2):
     threading.Thread(target=_write, daemon=True).start()
 
 
+def _save_live_template_async(image, directory, cv2):
+    """保存开售态「立即购买」按钮模板（只存一次），下次开抢匹配更快。"""
+
+    def _write():
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            destination = directory / "buy-live.png"
+            if destination.exists():
+                return
+            cv2.imwrite(str(destination), image)
+            print(f"已保存开售态底栏模板：{destination.name}")
+        except Exception:
+            # 模板只是下次提速，失败不影响本次放行
+            pass
+
+    threading.Thread(target=_write, daemon=True).start()
+
+
 NEGATIVE_TEMPLATE_PREFIX = "negative-"
 
 
 def _load_scrcpy_templates(cv2, template_dir=None):
-    """正面模板：只加载非 negative- 前缀的 PNG。"""
+    """正面模板：只加载详情页底栏模板，排除负向与票档页「确定」模板。"""
     directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
     if not directory.is_dir():
         return []
@@ -283,10 +312,34 @@ def _load_scrcpy_templates(cv2, template_dir=None):
     for path in sorted(directory.glob("*.png")):
         if path.stem.startswith(NEGATIVE_TEMPLATE_PREFIX):
             continue
+        if path.stem.startswith("sku-"):
+            continue
         image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
         if image is not None and image.size:
             templates.append((path.stem, image))
     return templates
+
+
+def _load_named_templates(cv2, prefix, template_dir=None):
+    directory = Path(template_dir) if template_dir else SCRCPY_TEMPLATE_DIR
+    if not directory.is_dir():
+        return []
+    templates = []
+    for path in sorted(directory.glob(f"{prefix}*.png")):
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if image is not None and image.size:
+            templates.append((path.stem, image))
+    return templates
+
+
+def _load_sku_confirm_templates(cv2, template_dir=None):
+    """票档页「确定」按钮模板：只加载 sku-confirm 前缀。"""
+    return _load_named_templates(cv2, SKU_CONFIRM_PREFIX, template_dir)
+
+
+def _load_submit_templates(cv2, template_dir=None):
+    """确认页「立即提交」按钮模板：只加载 sku-submit 前缀。"""
+    return _load_named_templates(cv2, SUBMIT_TEMPLATE_PREFIX, template_dir)
 
 
 def _load_scrcpy_negatives(cv2, template_dir=None):
@@ -304,11 +357,12 @@ def _load_scrcpy_negatives(cv2, template_dir=None):
     return negatives
 
 
-def _scrcpy_template_hit(crop, templates, cv2):
+def _scrcpy_template_hit(crop, templates, cv2, stats=None):
     if not templates:
         return False
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    for _name, template in templates:
+    best = -1.0
+    for name, template in templates:
         for scale in (0.5, 0.59, 0.67, 0.8, 1.0, 1.25, 1.5, 2.0):
             width = max(1, int(template.shape[1] * scale))
             height = max(1, int(template.shape[0] * scale))
@@ -316,9 +370,97 @@ def _scrcpy_template_hit(crop, templates, cv2):
                 continue
             resized = cv2.resize(template, (width, height), interpolation=cv2.INTER_AREA)
             scores = cv2.matchTemplate(gray, resized, cv2.TM_CCOEFF_NORMED)
-            if float(scores.max()) >= SCRCPY_TEMPLATE_THRESHOLD:
+            score = float(scores.max())
+            if stats is not None and score > best:
+                best = score
+                stats.update({"score": score, "template": name, "scale": scale})
+            if score >= SCRCPY_TEMPLATE_THRESHOLD:
                 return True
     return False
+
+
+def _sku_search_crop(frame, focus_point, screen_size, cv2):
+    """裁票档页底部「确定」按钮附近区域，完全不含左侧价格块。"""
+    if not focus_point or not screen_size or not all(screen_size):
+        return None
+    height, width = frame.shape[:2]
+    center_x = int(focus_point[0] * width / screen_size[0])
+    center_y = int(focus_point[1] * height / screen_size[1])
+    half_width = max(60, int(width * SKU_SEARCH_HALF_WIDTH))
+    half_height = max(20, int(height * SKU_SEARCH_HALF_HEIGHT))
+    left = max(0, center_x - half_width)
+    right = min(width, center_x + half_width)
+    top = max(0, center_y - half_height)
+    bottom = min(height, center_y + half_height)
+    if right <= left or bottom <= top:
+        return None
+    return frame[top:bottom, left:right]
+
+
+def _watch_fixed_button(
+    stream,
+    focus_point,
+    screen_size,
+    timeout: float,
+    templates,
+) -> bool:
+    """固定按钮区域是否已出现且可用；超时返回 False。"""
+    import cv2
+
+    if not templates:
+        return False
+    deadline = time.monotonic() + max(timeout, 0.0)
+    while time.monotonic() < deadline:
+        frame = stream.read_latest()
+        if frame is None:
+            time.sleep(0.002)
+            continue
+        crop = _sku_search_crop(frame, focus_point, screen_size, cv2)
+        if crop is None:
+            continue
+        if _scrcpy_template_hit(crop, templates, cv2) and _button_is_enabled(
+            frame, focus_point, screen_size, cv2
+        ):
+            return True
+    return False
+
+
+def watch_sku_confirm(
+    stream,
+    focus_point,
+    screen_size,
+    timeout: float,
+    template_dir=None,
+) -> bool:
+    """票档页「确定」按钮是否已出现且可用；模板缺失时立即返回 False。"""
+    import cv2
+
+    return _watch_fixed_button(
+        stream,
+        focus_point,
+        screen_size,
+        timeout,
+        _load_sku_confirm_templates(cv2, template_dir),
+    )
+
+
+def watch_submit_ready(
+    stream,
+    focus_point,
+    screen_size,
+    timeout: float,
+    template_dir=None,
+) -> bool:
+    """确认页「立即提交」按钮是否已出现且可用；模板缺失时立即返回 False。"""
+    import cv2
+
+    return _watch_fixed_button(
+        stream,
+        focus_point,
+        screen_size,
+        timeout,
+        _load_submit_templates(cv2, template_dir),
+    )
 
 
 def make_scrcpy_watcher(
@@ -326,6 +468,7 @@ def make_scrcpy_watcher(
     focus_point=None,
     screen_size=None,
     template_dir=None,
+    keep_alive: bool = False,
 ):
     """接收 Scrcpy 最新帧；模板命中即放行，开售时刻后模板未命中时自动补采放行。"""
     try:
@@ -358,12 +501,20 @@ def make_scrcpy_watcher(
         last_change_at = None
         dim_warned = False
         negative_warned = False
+        best_after_target = -1.0
+        best_after_scale = None
         # 没有按钮坐标时无法确认翻转区域，不启用自动补采放行
         auto_capture = bool(focus_point and screen_size and all(screen_size))
         try:
             while True:
                 now = time.monotonic()
                 if now >= deadline:
+                    if best_after_target >= 0:
+                        print(
+                            f"底栏模板最高分 {best_after_target:.3f}"
+                            f"（阈值 {SCRCPY_TEMPLATE_THRESHOLD}，"
+                            f"scale={best_after_scale}），未放行"
+                        )
                     return False
                 frame = stream.read_latest()
                 if frame is None:
@@ -395,12 +546,32 @@ def make_scrcpy_watcher(
                         )
                         negative_warned = True
                     continue
-                if changed and _scrcpy_template_hit(crop, templates, cv2):
+                stats = {}
+                hit = changed and _scrcpy_template_hit(
+                    crop, templates, cv2, stats=stats
+                )
+                if changed and now >= target_at and stats.get("score", -1) > best_after_target:
+                    best_after_target = stats["score"]
+                    best_after_scale = stats.get("scale")
+                if hit:
                     if not _button_is_enabled(frame, focus_point, screen_size, cv2):
                         if not dim_warned:
                             print("模板命中，但底栏仍是灰暗色（未开售/已预约），继续等待翻转")
                             dim_warned = True
                         continue
+                    if now >= target_at:
+                        print(
+                            f"底栏模板命中：score={stats.get('score', 0):.3f} "
+                            f"scale={stats.get('scale')}，"
+                            f"开售后 {(now - target_at) * 1000:.0f} 毫秒"
+                        )
+                        live_image = _buy_button_crop(
+                            frame, focus_point, screen_size, cv2
+                        )
+                        if auto_capture and live_image is not None:
+                            _save_live_template_async(
+                                live_image, template_root, cv2
+                            )
                     return True
                 if (
                     not auto_capture
@@ -435,8 +606,12 @@ def make_scrcpy_watcher(
                 f"Scrcpy 视频感知失败（{type(exc).__name__}: {exc}）"
             ) from exc
         finally:
-            stream.stop()
+            if not keep_alive:
+                stream.stop()
 
+    # 保持视频流存活时，把句柄交给调用方，由抢票流程在提交/超时/异常时统一关闭
+    watch.stream = stream
+    watch.close = stream.stop
     return "Scrcpy 实时帧+按钮模板（无 OCR）", watch
 
 

@@ -373,3 +373,141 @@ def test_timing_summary_emits_stage_table_and_json(capsys):
     assert payload["submitted"] is True
     assert payload["total_ms"] == 1880
     assert payload["stages"][1] == {"label": "票档页可点", "ms": 430}
+
+
+def test_run_fast_waits_for_sku_confirm_before_tap():
+    """票档页首帧后先做模板感知，再点确定。"""
+    bot = make_bot()
+    bot._wait_any_activity = Mock(return_value="DmOrderActivity")
+    bot._wait_activity_gone = Mock(return_value=True)
+    bot._wait_sku_confirm_ready = Mock(return_value=True)
+
+    assert bot._run_fast() is True
+
+    bot._wait_sku_confirm_ready.assert_called_once_with((950, 2562))
+    assert tapped(bot) == [(950, 2562), (941, 2563)]
+
+
+def test_wait_sku_confirm_returns_false_without_stream():
+    bot = make_bot()
+    bot._flip_stream = None
+
+    assert bot._wait_sku_confirm_ready((950, 2562)) is False
+
+
+def test_wait_sku_confirm_hit_marks_template_hit(mocker):
+    bot = make_bot()
+    bot._flip_stream = object()
+    bot._adb_size = Mock(return_value=(1220, 2712))
+    bot.config.flip_template_dir = ""
+    mocker.patch("flip_watch.watch_sku_confirm", return_value=True)
+
+    assert bot._wait_sku_confirm_ready((950, 2562)) is True
+    bot._mark.assert_any_call("票档页模板命中")
+
+
+def test_wait_sku_confirm_timeout_marks_fallback(mocker):
+    bot = make_bot()
+    bot._flip_stream = object()
+    bot._adb_size = Mock(return_value=(1220, 2712))
+    bot.config.flip_template_dir = ""
+    mocker.patch("flip_watch.watch_sku_confirm", return_value=False)
+
+    assert bot._wait_sku_confirm_ready((950, 2562)) is False
+    bot._mark.assert_any_call("票档页兜底点击")
+
+
+def test_wait_sku_confirm_stream_error_does_not_block(mocker):
+    bot = make_bot()
+    bot._flip_stream = object()
+    bot._adb_size = Mock(return_value=(1220, 2712))
+    mocker.patch("flip_watch.watch_sku_confirm", side_effect=RuntimeError("流断开"))
+
+    assert bot._wait_sku_confirm_ready((950, 2562)) is False
+
+
+def test_expected_total_uses_unit_times_count(capsys):
+    bot = make_bot()
+    bot.config.price = "1299元"
+    bot.config.ticket_count = 2
+
+    bot._print_expected_total()
+
+    output = capsys.readouterr().out
+    assert "2598" in output
+    assert "1299" in output
+
+
+def test_close_flip_stream_is_idempotent():
+    bot = make_bot()
+    bot._flip_stream = Mock()
+
+    bot._close_flip_stream()
+    bot._close_flip_stream()
+
+    assert bot._flip_stream is None
+
+
+def test_run_fast_uses_submit_template_when_ready():
+    """确认页首帧后命中「立即提交」模板，立刻点击，跳过固定 0.4 秒。"""
+    bot = make_bot()
+    bot._wait_any_activity = Mock(return_value="DmOrderActivity")
+    bot._wait_activity_gone = Mock(return_value=True)
+    bot._wait_submit_ready = Mock(return_value=(True, 0.08))
+
+    assert bot._run_fast() is True
+
+    assert tapped(bot) == [(950, 2562), (941, 2563)]
+    bot._wait_submit_ready.assert_called_once_with(0)
+
+
+def test_run_fast_falls_back_to_settle_when_template_misses():
+    bot = make_bot()
+    bot._wait_any_activity = Mock(return_value="DmOrderActivity")
+    bot._wait_activity_gone = Mock(return_value=True)
+    bot._wait_submit_ready = Mock(return_value=(False, 0.10))
+
+    assert bot._run_fast() is True
+
+    assert tapped(bot) == [(950, 2562), (941, 2563)]
+    bot._mark.assert_any_call("确认页稳定")
+
+
+def test_wait_confirm_ready_reads_in_background():
+    bot = make_bot()
+    page = {"amount": 1080.0, "selected": 1, "submit": (940, 2563)}
+    bot._confirm_snapshot = Mock(return_value=page)
+
+    found, waited, mode = bot._wait_confirm_ready(0.5)
+
+    assert found == page
+    assert mode == "read"
+    assert waited >= 0
+
+
+def test_wait_confirm_ready_timeout_does_not_block():
+    bot = make_bot()
+    bot._confirm_snapshot = Mock(
+        side_effect=lambda direct=False: time.sleep(0.3) or None
+    )
+    started = time.perf_counter()
+
+    found, _waited, mode = bot._wait_confirm_ready(0.05)
+
+    assert found is None
+    assert mode == "timeout"
+    assert time.perf_counter() - started < 0.2
+
+
+def test_report_confirm_page_warns_on_amount_and_viewers(capsys):
+    bot = make_bot()
+    bot.config.ticket_count = 2
+    bot.config.price = "1299"
+
+    bot._report_confirm_page(
+        {"amount": 1080.0, "selected": 1, "submit": (940, 2563)}, 0.18
+    )
+
+    output = capsys.readouterr().out
+    assert "不一致" in output
+    assert "观演人 1" in output

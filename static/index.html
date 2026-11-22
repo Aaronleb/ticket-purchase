@@ -101,6 +101,13 @@
           <label class="field"><span>购票数量 <b>1–6 张</b></span><input id="android-ticket-count" type="number" min="1" max="6" step="1" value="1" required></label>
           <label class="field"><span>抢购时间 <b>北京时间</b></span><input id="android-sell-start-time" type="datetime-local" step="1" required></label>
         </div>
+
+        <div class="field-grid">
+          <label class="field"><span>票档单价 <b>选填</b></span><input id="android-price" type="text" placeholder="例如：1299" autocomplete="off"></label>
+          <label class="field"><span>预计总价</span><input id="android-total" type="text" value="未填单价" readonly tabindex="-1"></label>
+        </div>
+        <p class="field-hint">预计总价 = 票档单价 × 购票数量，只用于开抢前核对和日志；不会读取按钮上的金额。</p>
+
         <p id="android-device-hint" class="field-hint">仅支持已预约演出：请先在大麦 App 选好场次、票档和观演人。启动后程序自动等到抢购时间，不需要再次点击。</p>
 
         <div class="preference-row android-preferences">
@@ -119,7 +126,7 @@
             <button id="android-calibrate" class="button button-outline" type="button">采集当前页按钮坐标</button>
             <button id="android-calibrate-negative" class="button button-outline" type="button">采集「已预约」模板</button>
           </div>
-          <p id="android-calibrate-hint" class="field-hint">把大麦依次停在详情页 → 选票档页 → 确认页，每页点一次「采集当前页按钮坐标」；在显示「已预约/未开售」的详情页点「采集『已预约』模板」，可保存负向模板防止开售后误点。</p>
+          <p id="android-calibrate-hint" class="field-hint">把大麦依次停在详情页 → 选票档页 → 确认页，每页点一次「采集当前页按钮坐标」；票档页会同时生成「确定」按钮模板（只裁右侧固定按钮，不含左侧金额）。在显示「已预约/未开售」的详情页点「采集『已预约』模板」，可保存负向模板防止开售后误点。</p>
         </details>
 
         <div class="form-footer">
@@ -162,6 +169,9 @@
             <button id="android-performance-test" class="button button-outline button-block" type="button">设备性能测试</button>
             <p id="android-performance-hint" class="operation-hint">读取内存、温度、动画、帧率与大麦进程状态。</p>
             <div id="android-performance-results" class="diagnostics-results" role="status" hidden></div>
+            <button id="android-prewarm" class="button button-outline button-block" type="button">预热票档页（2 次）</button>
+            <p id="android-prewarm-hint" class="operation-hint">先打开一个非目标演出的详情页（目标详情页留在上一页）再点此按钮；会打开/返回原生票档页 2 次，最后退回上一页，不会点确定或下单。</p>
+            <div id="android-prewarm-results" class="diagnostics-results" role="status" hidden></div>
           </div>
           <div class="operation-divider"></div>
           <button id="check-button" class="button button-outline button-block" type="button">运行环境自检</button>

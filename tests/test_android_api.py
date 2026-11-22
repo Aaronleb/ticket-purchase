@@ -118,6 +118,22 @@ class AndroidApiTests(unittest.TestCase):
             performance.call_args.args[0], valid_android_config()["device_name"]
         )
 
+    def test_android_prewarm_returns_runs(self):
+        result = {
+            "ok": True,
+            "runs": [{"run": 1, "ok": True, "open_ms": 120}],
+            "message": "票档页预热完成",
+        }
+        with patch("app.prewarm_ticket_page", return_value=result) as prewarm:
+            status, actual = self.request(
+                "POST", "/api/android/prewarm", valid_android_config()
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(actual, result)
+        self.assertEqual(
+            prewarm.call_args.args[0], valid_android_config()["device_name"]
+        )
+
     def test_android_dry_run_passes_env_without_persisting_flag(self):
         report = {"ok": True, "checks": []}
         with patch.object(

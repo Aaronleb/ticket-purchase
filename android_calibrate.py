@@ -151,6 +151,42 @@ def _save_buy_template(image_path: str, point, template_dir) -> str:
     return _save_button_template(image_path, point, template_dir, "buy.png")
 
 
+def _save_sku_confirm_template(
+    image_path: str, point, template_dir, filename: str = "sku-confirm.png"
+) -> str:
+    """票档页「确定」/确认页「立即提交」按钮模板：只裁固定按钮框。
+
+    票档页价格块宽度会随金额变化，必须排除；确认页同理只用按钮本体。
+    以 OCR 识别到的按钮文字中心为锚点裁固定大小。
+    """
+    from PIL import Image
+
+    from flip_watch import SKU_TEMPLATE_HALF_HEIGHT, SKU_TEMPLATE_HALF_WIDTH
+
+    directory = Path(template_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    image = Image.open(image_path).convert("L")
+    half_width = max(60, int(image.width * SKU_TEMPLATE_HALF_WIDTH))
+    half_height = max(20, int(image.height * SKU_TEMPLATE_HALF_HEIGHT))
+    crop = image.crop(
+        (
+            max(0, point[0] - half_width),
+            max(0, point[1] - half_height),
+            min(image.width, point[0] + half_width),
+            min(image.height, point[1] + half_height),
+        )
+    )
+    destination = directory / filename
+    crop.save(destination, format="PNG")
+    return str(destination)
+
+
+def _save_submit_template(image_path: str, point, template_dir) -> str:
+    return _save_sku_confirm_template(
+        image_path, point, template_dir, filename="sku-submit.png"
+    )
+
+
 def _template_warning(template_path: str) -> str:
     """模板是灰暗的未开售按钮时提示风险（灰度模板只能确认文字形状）。"""
     try:
@@ -209,6 +245,16 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
         warning = _template_warning(result["template_path"])
         if warning:
             result["warning"] = warning
+    elif field == "confirm_point" and text_confirmed and template_dir:
+        # 顺带生成票档页「确定」按钮模板（固定区域，不含金额）
+        result["template_path"] = _save_sku_confirm_template(
+            image_path, point, template_dir
+        )
+    elif field == "submit_point" and text_confirmed and template_dir:
+        # 确认页「立即提交」模板：首帧后命中即可点，替代固定 0.4 秒等待
+        result["template_path"] = _save_submit_template(
+            image_path, point, template_dir
+        )
     return result
 
 

@@ -586,3 +586,207 @@ def test_fast_mode_retaps_confirm_when_first_tap_lost(mocker):
     assert bot._run_fast() is True
     assert taps == [(950, 2562), (950, 2562)]
     assert bot._wait_any_activity.call_count == 2
+
+
+def test_sku_confirm_template_is_loaded_separately(tmp_path):
+    import cv2
+    import numpy as np
+
+    cv2.imwrite(str(tmp_path / "buy.png"), np.zeros((15, 60), dtype=np.uint8))
+    cv2.imwrite(str(tmp_path / "sku-confirm.png"), np.zeros((30, 90), dtype=np.uint8))
+
+    buy_names = [name for name, _ in flip_watch._load_scrcpy_templates(cv2, tmp_path)]
+    sku_names = [name for name, _ in flip_watch._load_sku_confirm_templates(cv2, tmp_path)]
+
+    assert buy_names == ["buy"]
+    assert sku_names == ["sku-confirm"]
+
+
+def _sku_frame(price_right=200):
+    import numpy as np
+
+    frame = np.zeros((1600, 720, 3), dtype=np.uint8)
+    # 左侧价格块：宽度变化不应影响右侧按钮区域
+    frame[1500:1580, 20:price_right] = (40, 40, 220)
+    # 右侧确定按钮（橙色）
+    frame[1505:1575, 430:702] = (30, 90, 240)
+    frame[1530:1555, 470:660] = 255
+    return frame
+
+
+def test_sku_search_crop_ignores_price_width():
+    import cv2
+
+    narrow = flip_watch._sku_search_crop(
+        _sku_frame(200), (960, 2613), (1220, 2712), cv2
+    )
+    wide = flip_watch._sku_search_crop(
+        _sku_frame(320), (960, 2613), (1220, 2712), cv2
+    )
+
+    assert narrow is not None and wide is not None
+    assert narrow.shape == wide.shape
+    assert (narrow == wide).all()
+
+
+def test_watch_sku_confirm_hits_fixed_button(tmp_path):
+    import cv2
+
+    frame = _sku_frame()
+    cv2.imwrite(
+        str(tmp_path / "sku-confirm.png"),
+        cv2.cvtColor(frame[1505:1575, 430:702], cv2.COLOR_BGR2GRAY),
+    )
+
+    class FakeStream:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def read_latest(self):
+            return frame
+
+    assert flip_watch.watch_sku_confirm(
+        FakeStream(), (960, 2613), (1220, 2712), 0.2, template_dir=tmp_path
+    ) is True
+
+
+def test_watch_sku_confirm_without_template_does_not_block(tmp_path):
+    class FakeStream:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def read_latest(self):
+            return _sku_frame()
+
+    assert flip_watch.watch_sku_confirm(
+        FakeStream(), (960, 2613), (1220, 2712), 0.5, template_dir=tmp_path
+    ) is False
+
+
+def test_keep_alive_stream_survives_watch_and_closes_on_demand(mocker, tmp_path):
+    import cv2
+    import numpy as np
+
+    # 纯白模板：与 frame 底栏里的白色按钮条完全一致
+    cv2.imwrite(str(tmp_path / "buy.png"), np.full((15, 60), 255, dtype=np.uint8))
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    frame[100:115, 20:80] = 255
+    streams = []
+
+    class FakeStream:
+        def __init__(self, _device):
+            self.stopped = False
+            streams.append(self)
+
+        def start(self):
+            pass
+
+        def read_latest(self):
+            return frame
+
+        def stop(self):
+            self.stopped = True
+
+    mocker.patch("scrcpy_stream.ScrcpyStream", FakeStream)
+    _, watch = flip_watch.make_scrcpy_watcher(
+        "fake", template_dir=tmp_path, keep_alive=True
+    )
+
+    assert watch(1.0) is True
+    assert streams[0].stopped is False
+    watch.close()
+    assert streams[0].stopped is True
+
+
+def test_template_hit_reports_best_score(tmp_path):
+    import cv2
+    import numpy as np
+
+    template = np.full((15, 60), 255, dtype=np.uint8)
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    frame[100:115, 20:80] = 255
+    crop = flip_watch._scrcpy_crop(frame, None, None)
+    stats = {}
+
+    assert flip_watch._scrcpy_template_hit(
+        crop, [("buy", template)], cv2, stats=stats
+    ) is True
+    assert stats["score"] >= flip_watch.SCRCPY_TEMPLATE_THRESHOLD
+    assert stats["template"] == "buy"
+    assert stats["scale"] in (0.5, 0.59, 0.67, 0.8, 1.0, 1.25, 1.5, 2.0)
+
+
+def test_live_template_is_saved_only_once(tmp_path):
+    import cv2
+    import numpy as np
+    import time
+
+    image = np.zeros((20, 60), dtype=np.uint8)
+
+    flip_watch._save_live_template_async(image, tmp_path, cv2)
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and not (tmp_path / "buy-live.png").exists():
+        time.sleep(0.01)
+    assert (tmp_path / "buy-live.png").is_file()
+    first = (tmp_path / "buy-live.png").read_bytes()
+
+    flip_watch._save_live_template_async(image, tmp_path, cv2)
+    time.sleep(0.1)
+    assert (tmp_path / "buy-live.png").read_bytes() == first
+
+
+def test_scrcpy_stream_defaults_to_30_fps():
+    from scrcpy_stream import ScrcpyStream
+
+    assert ScrcpyStream("fake").max_fps == 30
+
+
+def test_submit_template_is_loaded_separately(tmp_path):
+    import cv2
+    import numpy as np
+
+    cv2.imwrite(str(tmp_path / "buy.png"), np.zeros((15, 60), dtype=np.uint8))
+    cv2.imwrite(str(tmp_path / "sku-confirm.png"), np.zeros((30, 90), dtype=np.uint8))
+    cv2.imwrite(str(tmp_path / "sku-submit.png"), np.zeros((30, 90), dtype=np.uint8))
+
+    buy_names = [name for name, _ in flip_watch._load_scrcpy_templates(cv2, tmp_path)]
+    confirm_names = [
+        name for name, _ in flip_watch._load_sku_confirm_templates(cv2, tmp_path)
+    ]
+    submit_names = [
+        name for name, _ in flip_watch._load_submit_templates(cv2, tmp_path)
+    ]
+
+    assert buy_names == ["buy"]
+    assert confirm_names == ["sku-confirm"]
+    assert submit_names == ["sku-submit"]
+
+
+def test_watch_submit_ready_hits_fixed_button(tmp_path):
+    import cv2
+
+    frame = _sku_frame()
+    cv2.imwrite(
+        str(tmp_path / "sku-submit.png"),
+        cv2.cvtColor(frame[1505:1575, 430:702], cv2.COLOR_BGR2GRAY),
+    )
+
+    class FakeStream:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def read_latest(self):
+            return frame
+
+    assert flip_watch.watch_submit_ready(
+        FakeStream(), (960, 2613), (1220, 2712), 0.2, template_dir=tmp_path
+    ) is True

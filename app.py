@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from android_calibrate import calibrate_android_point, calibrate_negative_point
 from android_config import AndroidConfigStore
 from android_diagnostics import AndroidDiagnostics
+from android_prewarm import prewarm_ticket_page
 from time_sync import measure_time_sync
 from android_environment import AndroidEnvironment
 from config_store import ConfigError, ConfigStore, default_project_root
@@ -152,6 +153,18 @@ class WebApplication:
         config["flip_template_dir"] = str(template_dir)
         result["config"] = self.android_store.save(config)
         return result
+
+    def prewarm_android(self, payload=None):
+        """在非目标演出详情页上预热原生票档页（只导航，不点确定/不下单）。"""
+        config = self._android_config_with_form(payload)
+        device = str(config.get("device_name") or "").strip()
+        if not device:
+            raise ConfigError("请先在安卓配置里填写设备名")
+        return prewarm_ticket_page(
+            device,
+            buy_point=str(config.get("buy_point") or ""),
+            runs=2,
+        )
 
     def time_sync_android(self):
         """测量本机与手机、阿里系服务器的时钟偏差。"""
@@ -311,6 +324,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.calibrate_android(self._optional_json()))
             elif method == "POST" and path == "/api/android/calibrate-negative":
                 self._json(200, app.calibrate_negative(self._optional_json()))
+            elif method == "POST" and path == "/api/android/prewarm":
+                self._json(200, app.prewarm_android(self._optional_json()))
             elif method == "GET" and path == "/api/android/time-sync":
                 self._json(200, app.time_sync_android())
             elif method == "POST" and path == "/api/android/network-test":

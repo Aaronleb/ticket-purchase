@@ -77,6 +77,7 @@ function readAndroidConfig() {
     device_name: $("#android-device-name").value.trim(),
     platform_version: $("#android-platform-version").value.trim(),
     ticket_count: Number($("#android-ticket-count").value),
+    price: $("#android-price").value.trim(),
     sell_start_time: $("#android-sell-start-time").value,
     if_commit_order: $("#android-if-commit").checked,
     fast_mode: $("#android-fast-mode").checked,
@@ -87,12 +88,28 @@ function readAndroidConfig() {
   };
 }
 
+function updateAndroidTotal() {
+  const totalInput = $("#android-total");
+  if (!totalInput) return;
+  const raw = ($("#android-price").value || "").replaceAll(",", "").trim();
+  const count = Number($("#android-ticket-count").value);
+  const match = raw.match(/\d+(?:\.\d+)?/);
+  const unit = match ? Number(match[0]) : NaN;
+  if (!Number.isFinite(unit) || unit <= 0 || !Number.isInteger(count) || count <= 0) {
+    totalInput.value = "未填单价";
+    return;
+  }
+  const total = unit * count;
+  totalInput.value = `¥${Number.isInteger(total) ? total : total.toFixed(2)}`;
+}
+
 function fillAndroidConfig(config) {
   currentAndroidConfig = { ...config };
   $("#android-server-url").value = config.server_url || "http://127.0.0.1:4723";
   $("#android-device-name").value = config.device_name || "";
   $("#android-platform-version").value = config.platform_version || "";
   $("#android-ticket-count").value = config.ticket_count ?? 1;
+  $("#android-price").value = config.price || "";
   $("#android-sell-start-time").value = config.sell_start_time ? config.sell_start_time.slice(0, 19) : "";
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
   $("#android-fast-mode").checked = config.fast_mode !== false;
@@ -100,6 +117,7 @@ function fillAndroidConfig(config) {
   $("#android-submit-point").value = config.submit_point || "";
   $("#android-buy-point").value = config.buy_point || "";
   $("#android-flip-template-dir").value = config.flip_template_dir || "";
+  updateAndroidTotal();
 }
 
 function validateConfig(config, platform, options = {}) {
@@ -113,6 +131,10 @@ function validateConfig(config, platform, options = {}) {
   if (!config.platform_version) throw new Error("请填写 Android 版本");
   if (!$("#android-ticket-count").value || !Number.isInteger(config.ticket_count) || config.ticket_count < 1 || config.ticket_count > 6) {
     throw new Error("购票数量必须是 1 到 6 之间的整数");
+  }
+  const priceText = String(config.price || "").replaceAll(",", "").trim();
+  if (priceText && !/\d+(?:\.\d+)?/.test(priceText)) {
+    throw new Error("票档单价里需要包含数字，例如 1299");
   }
   if (options.skipSaleTime) return;
   if (!config.sell_start_time) throw new Error("请填写抢购时间");
@@ -165,7 +187,7 @@ function updateStatus(status) {
   $("#stop-button").disabled = phase === "stopping";
   $("#login-button").hidden = phase === "waiting_login";
   $("#login-complete-button").hidden = phase !== "waiting_login";
-  for (const selector of ["#login-button", "#check-button", "#android-network-test", "#android-performance-test", "#android-dry-run", "#android-run-now"]) $(selector).disabled = active;
+  for (const selector of ["#login-button", "#check-button", "#android-network-test", "#android-performance-test", "#android-dry-run", "#android-run-now", "#android-prewarm"]) $(selector).disabled = active;
   document.querySelectorAll("[data-platform]").forEach((button) => { button.disabled = active; });
   $("#start-button").disabled = active;
 
@@ -315,6 +337,48 @@ async function runAndroidDiagnostic(kind) {
 $("#android-network-test").addEventListener("click", () => runAndroidDiagnostic("network"));
 $("#android-performance-test").addEventListener("click", () => runAndroidDiagnostic("performance"));
 
+function renderPrewarmResults(data) {
+  const container = $("#android-prewarm-results");
+  container.hidden = false;
+  container.textContent = "";
+  const summary = document.createElement("p");
+  summary.textContent = data.message || (data.ok ? "票档页预热完成" : "票档页预热失败");
+  container.appendChild(summary);
+  for (const run of data.runs || []) {
+    const line = document.createElement("p");
+    line.textContent = run.ok
+      ? `第 ${run.run} 次：打开票档页 ${run.open_ms} ms`
+      : `第 ${run.run} 次：未进入票档页（${run.activity || "未知"}）`;
+    container.appendChild(line);
+  }
+}
+
+$("#android-prewarm").addEventListener("click", async () => {
+  const button = $("#android-prewarm");
+  const label = button.textContent;
+  const container = $("#android-prewarm-results");
+  button.disabled = true;
+  button.textContent = "预热中…";
+  container.hidden = false;
+  container.textContent = "正在预热：打开并返回票档页 2 次，不会点确定或下单…";
+  try {
+    const config = readAndroidConfig();
+    if (!config.device_name) throw new Error("请先填写设备名");
+    const data = await api("/api/android/prewarm", {
+      method: "POST",
+      body: JSON.stringify(config),
+    });
+    renderPrewarmResults(data);
+    toast(data.ok ? "票档页预热完成" : data.message || "票档页预热失败", !data.ok);
+  } catch (error) {
+    container.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    button.disabled = activePhases.has(currentStatus.phase);
+    button.textContent = label;
+  }
+});
+
 const TIMING_PREFIX = "[TIMING] ";
 
 function timingFromLog(entry) {
@@ -428,6 +492,8 @@ async function refreshAndroidDevices() {
 }
 
 $("#android-device-name").addEventListener("change", (event) => selectAndroidDevice(event.target.value.trim()));
+$("#android-price").addEventListener("input", updateAndroidTotal);
+$("#android-ticket-count").addEventListener("input", updateAndroidTotal);
 $("#android-refresh-devices").addEventListener("click", refreshAndroidDevices);
 
 async function checkTimeSync() {
