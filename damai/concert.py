@@ -33,6 +33,11 @@ class Concert:
             exit(1)
 
         chrome_options = webdriver.ChromeOptions()
+        chrome_binary = os.environ.get("DAMAI_CHROME_BINARY") or os.environ.get("CHROME_PATH")
+        if chrome_binary and os.path.exists(chrome_binary):
+            chrome_options.binary_location = chrome_binary
+        chrome_options.add_argument("--no-first-run")
+        chrome_options.add_argument("--no-default-browser-check")
         chrome_options.add_experimental_option("excludeSwitches", ['enable-automation'])
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
 

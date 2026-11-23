@@ -187,7 +187,7 @@ function updateStatus(status) {
   $("#stop-button").disabled = phase === "stopping";
   $("#login-button").hidden = phase === "waiting_login";
   $("#login-complete-button").hidden = phase !== "waiting_login";
-  for (const selector of ["#login-button", "#check-button", "#android-network-test", "#android-performance-test", "#android-dry-run", "#android-run-now", "#android-prewarm"]) $(selector).disabled = active;
+  for (const selector of ["#login-button", "#check-button", "#android-network-test", "#android-performance-test", "#android-prewarm"]) $(selector).disabled = active;
   document.querySelectorAll("[data-platform]").forEach((button) => { button.disabled = active; });
   $("#start-button").disabled = active;
 
@@ -592,54 +592,6 @@ $("#android-config-form").addEventListener("submit", async (event) => {
     toast("安卓设备与预约数量已保存");
   } catch (error) {
     toast(error.message, true);
-  }
-});
-
-$("#android-run-now").addEventListener("click", async () => {
-  const button = $("#android-run-now");
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = "启动中…";
-  try {
-    const config = readAndroidConfig();
-    validateConfig(config, "android", { skipSaleTime: true });
-    await api("/api/android/config", { method: "PUT", body: JSON.stringify(config) });
-    fillAndroidConfig(config);
-    const status = await api("/api/android/start", {
-      method: "POST",
-      body: JSON.stringify({ ...config, run_now: true }),
-    });
-    updateStatus(status);
-    toast("立即演练已启动：跳过倒计时，到确认页停止，不会提交");
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    button.disabled = activePhases.has(currentStatus.phase);
-    button.textContent = label;
-  }
-});
-
-$("#android-dry-run").addEventListener("click", async () => {
-  const button = $("#android-dry-run");
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = "启动演练…";
-  try {
-    const config = readAndroidConfig();
-    validateConfig(config, "android");
-    await api("/api/android/config", { method: "PUT", body: JSON.stringify(config) });
-    fillAndroidConfig(config);
-    const status = await api("/api/android/start", {
-      method: "POST",
-      body: JSON.stringify({ ...config, dry_run: true }),
-    });
-    updateStatus(status);
-    toast("演练已启动：到确认页即停止，不会提交订单");
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    button.disabled = activePhases.has(currentStatus.phase);
-    button.textContent = label;
   }
 });
 

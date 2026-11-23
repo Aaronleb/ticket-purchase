@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pickle
 import sys
 import time
@@ -45,7 +46,10 @@ def main() -> int:
     from selenium.webdriver.chrome.service import Service
 
     options = webdriver.ChromeOptions()
-    for arg in ("--no-sandbox", "--disable-gpu", "--window-size=1200,900", f"--user-agent={USER_AGENT}"):
+    chrome_binary = os.environ.get("DAMAI_CHROME_BINARY") or os.environ.get("CHROME_PATH")
+    if chrome_binary and os.path.exists(chrome_binary):
+        options.binary_location = chrome_binary
+    for arg in ("--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--window-size=1200,900", f"--user-agent={USER_AGENT}"):
         options.add_argument(arg)
     if args.headless:
         options.add_argument("--headless=new")

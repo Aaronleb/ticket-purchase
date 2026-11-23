@@ -3,7 +3,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import process_manager
 from process_manager import ProcessManager, TaskBusy
 
 
@@ -55,6 +58,18 @@ class ProcessManagerTests(unittest.TestCase):
         signal = self.cwd / "login.signal"
         self.manager.complete_login(signal)
         self.assertEqual(signal.read_text(encoding="utf-8"), "done\n")
+
+    def test_windows_stop_uses_taskkill_tree(self):
+        proc = SimpleNamespace(pid=4321)
+        with patch.object(process_manager.os, "name", "nt"), patch.object(
+            process_manager.subprocess, "run"
+        ) as run:
+            self.manager._terminate_process_group(proc)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["taskkill", "/PID"])
+        self.assertIn("/T", command)
+        self.assertIn("/F", command)
 
 
 if __name__ == "__main__":

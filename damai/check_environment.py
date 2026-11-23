@@ -152,6 +152,12 @@ def _find_chrome():
     """查找 Chrome，返回 (path, version_str, major_version)。"""
     for chrome_path in _get_chrome_paths():
         if os.path.exists(chrome_path):
+            # 免安装包直接给出内置版本号，避免在 Windows 上执行 chrome.exe --version
+            # 触发打开浏览器窗口
+            env_version = os.environ.get("DAMAI_CHROME_VERSION")
+            if env_version:
+                return chrome_path, f"Google Chrome {env_version}", _get_version_from_output(env_version)
+
             version_str = _run_command_get_version([chrome_path, "--version"])
             if version_str:
                 chrome_version = _get_version_from_output(version_str)

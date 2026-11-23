@@ -50,6 +50,19 @@ python3 -m venv .venv
 
 服务只监听本机地址，不接收账号密码。开发模式默认直接控制本项目的 `damai/` 和 `damai_appium/`。
 
+## Windows 免安装包（仅 PC）
+
+在 macOS/Linux 上可组装 Windows 免安装版，产物不需要目标机安装 Python：
+
+```bash
+./packaging/build_windows_portable.sh
+# 产物：dist/ticket-purchase-windows-pc/ 和 dist/ticket-purchase-windows-pc.zip
+```
+
+把 zip 拷到 Windows 10/11 解压，双击 `启动抢票.bat` 即可。包内使用官方嵌入式 Python 3.12、win_amd64 依赖，以及与 ChromeDriver 同版本的 Chrome for Testing，因此目标机不需要安装 Python、Chrome 或驱动；配置与 Cookie 都保存在解压目录内。
+
+该包只包含 PC 抢票组件，不包含 Appium、adb、Node.js，因此安卓入口不可用。需要完整安卓功能时请使用 macOS 的 DMG，或在 Windows 上自行安装 Appium 环境后运行源码。
+
 ### PC 使用顺序
 
 1. 选择“PC”，填写演出链接、城市、日期、票价和观演人，保存配置。
@@ -72,8 +85,6 @@ appium --address 127.0.0.1 --port 4723
 用 `adb devices` 确认设备在线，输出第一列就是控制台需要填写的设备名。在控制台选择“安卓”，填写设备、购票数量和抢购时间，保存后点击“检查安卓环境”。检查通过后再开始；程序会自动等待到设定时间，关闭自动提交时，脚本会停在订单确认页。
 
 控制台还提供“网络测试”和“设备性能测试”：前者只读 ping、丢包、抖动与 Wi-Fi 信号，后者只读内存、温度、动画、帧率和大麦进程状态，都不会修改设备。每次抢票结束后会输出分段耗时表和一行 `[TIMING]` JSON，页面据此展示普通模式/极速模式的放行、票档页、确认页与提交耗时。
-
-安卓配置页还有“演练（不提交）”按钮：只走到订单确认页就停止，即使勾选了自动提交也绝不会点击“立即提交”，用于安全地查看耗时评估。演练标记只通过环境变量传给本次进程，不会写入配置文件。
 
 安卓配置写入 `damai_appium/config.jsonc`。源码 Web 模式不会管理外部 Appium 服务，也不会把 PC Cookie 用作安卓登录态。
 

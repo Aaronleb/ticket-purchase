@@ -178,6 +178,24 @@ class ProcessManager:
             self._append_log(f"── 进程退出，代码 {code} ──")
             self._publish_status()
 
+    def _terminate_process_group(self, proc, force: bool = False) -> None:
+        """终止子进程及其子进程；Windows 没有进程组信号，改用 taskkill /T。"""
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return
+        try:
+            os.killpg(
+                os.getpgid(proc.pid),
+                signal.SIGKILL if force else signal.SIGTERM,
+            )
+        except ProcessLookupError:
+            pass
+
     def stop(self) -> dict:
         with self._lock:
             proc = self._proc
@@ -188,17 +206,11 @@ class ProcessManager:
             self._message = "正在停止任务"
         self._append_log("── 正在停止进程组 ──")
         self._publish_status()
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        self._terminate_process_group(proc)
         try:
             proc.wait(timeout=4)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            self._terminate_process_group(proc, force=True)
             proc.wait(timeout=2)
         return self.snapshot()
 

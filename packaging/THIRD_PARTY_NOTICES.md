@@ -4,6 +4,7 @@
 
 - Python：Python Software Foundation License。
 - Selenium 与 Appium-Python-Client：Apache License 2.0。
+- Chrome for Testing 与 ChromeDriver：Google Chrome 相关许可条款；Windows 免安装包内置同版本浏览器与驱动，仅用于本机自动化。
 - Node.js：MIT 及依赖组件许可证，完整 Node.js LICENSE 随应用附带。
 - Appium 与 Appium UiAutomator2 Driver：Apache License 2.0；npm 依赖的许可证文件保留在对应 `node_modules` 目录。
 - Android SDK Platform-Tools：Android SDK 许可条款及附带的第三方声明。
@@ -19,6 +20,7 @@
 
 - https://www.python.org/
 - https://www.selenium.dev/
+- https://googlechromelabs.github.io/chrome-for-testing/
 - https://appium.io/
 - https://nodejs.org/
 - https://developer.android.com/tools/releases/platform-tools

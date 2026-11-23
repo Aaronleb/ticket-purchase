@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import queue
 import sys
 import threading
@@ -93,7 +94,12 @@ class WebApplication:
             config["index_url"],
         ]
         driver = self.store.damai_dir / "chromedriver"
-        if driver.exists():
+        if not driver.is_file():
+            # Windows 免安装包通过 CHROMEDRIVER_PATH 指向内置驱动
+            configured = os.environ.get("CHROMEDRIVER_PATH", "").strip()
+            if configured:
+                driver = Path(configured)
+        if driver.is_file():
             command.extend(["--driver", str(driver)])
         return self.manager.start("login", command, self.store.project_root)
 

@@ -1,10 +1,12 @@
 import http.client
 import json
+import os
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import create_server
 from test_config_store import valid_config
@@ -68,6 +70,22 @@ class ApiTests(unittest.TestCase):
         status, error = self.request("PUT", "/api/config", valid_config(), same_origin=False)
         self.assertEqual(status, 400)
         self.assertIn("请求标识", error["error"])
+
+    def test_login_uses_chromedriver_from_environment(self):
+        driver = self.root / "chromedriver.exe"
+        driver.write_text("fake driver\n", encoding="utf-8")
+        with patch.dict(os.environ, {"CHROMEDRIVER_PATH": str(driver)}), patch.object(
+            self.server.application.manager,
+            "start",
+            return_value={"phase": "login", "task": "login"},
+        ) as start:
+            status, started = self.request("POST", "/api/login")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(started["task"], "login")
+        command = start.call_args.args[1]
+        self.assertIn("--driver", command)
+        self.assertEqual(command[command.index("--driver") + 1], str(driver))
 
     def test_one_click_start_executes_project_entry_and_reports_real_exit(self):
         status, started = self.request("POST", "/api/start", valid_config())
