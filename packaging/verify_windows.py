@@ -79,6 +79,19 @@ def print_logs() -> None:
             print("\n".join(lines[-80:]), file=sys.stderr)
 
 
+def write_error_annotation(message: str) -> None:
+    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error::{escaped}")
+
+
+def report_failure(exc: Exception) -> None:
+    write_error_annotation(f"{type(exc).__name__}: {exc}")
+    for path in (STDOUT, CONSOLE_LOG, APPIUM_LOG):
+        if path.is_file():
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            write_error_annotation(f"{path.name}\n" + "\n".join(lines[-40:]))
+
+
 def main() -> int:
     if os.name != "nt":
         raise RuntimeError("Windows zip 验证必须在 Windows 上运行")
@@ -172,8 +185,9 @@ def main() -> int:
         print(f"ADB：{version.stdout.splitlines()[0]}")
         print("内嵌 Appium、客户端、服务、配置写入均通过；未执行真实抢票。")
         return 0
-    except Exception:
+    except Exception as exc:
         print_logs()
+        report_failure(exc)
         raise
     finally:
         taskkill = system_root / "System32" / "taskkill.exe"
