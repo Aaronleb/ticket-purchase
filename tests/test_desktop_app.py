@@ -35,7 +35,8 @@ class DesktopAppTests(unittest.TestCase):
             desktop_app.APP_VERSION,
         )
         manifest = (self.destination / "node_modules" / ".cache" / "appium" / "extensions.yaml").read_text(encoding="utf-8")
-        self.assertIn(str(self.destination), manifest)
+        install_path = self.destination / "node_modules" / "appium-uiautomator2-driver"
+        self.assertIn(desktop_app.json.dumps(str(install_path), ensure_ascii=False), manifest)
         self.assertNotIn("/build/runtime", manifest)
 
     def test_prepare_appium_home_reuses_matching_version(self):
