@@ -41,7 +41,17 @@ jobs:
 
       - name: Build and verify Windows package
         shell: pwsh
-        run: ./packaging/build_windows.ps1
+        run: |
+          $buildOutput = @()
+          try {
+            ./packaging/build_windows.ps1 2>&1 | Tee-Object -Variable buildOutput
+          } catch {
+            $tail = ($buildOutput | Select-Object -Last 40 | Out-String)
+            $tail += $_.Exception.Message
+            $escaped = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error::$escaped"
+            throw
+          }
 
       - name: Upload verification logs on failure
         if: failure()
