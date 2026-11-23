@@ -15,6 +15,7 @@ hiddenimports = [
     "av",
     "cv2",
     "adbutils",
+    "appium",
 ] + ocr_hiddenimports
 
 analysis = Analysis(

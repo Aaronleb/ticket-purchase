@@ -114,7 +114,7 @@ def main() -> int:
             "PATH": os.pathsep.join([str(system_root / "System32"), str(system_root)]),
             "ANDROID_USER_HOME": str(DATA / "android"),
             "ANDROID_SDK_HOME": str(DATA),
-            "ADB_SERVER_SOCKET": "tcp:127.0.0.1:5038",
+            "ANDROID_ADB_SERVER_PORT": "5038",
         }
     )
     executable = APP / "DamaiAndroid.exe"
