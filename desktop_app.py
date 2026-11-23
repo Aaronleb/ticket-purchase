@@ -17,6 +17,15 @@ from appium_service import AppiumService
 APP_VERSION = "1.0.0"
 
 
+def configure_console_encoding() -> None:
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def default_resource_root() -> Path:
     if getattr(sys, "frozen", False):
         executable_dir = Path(sys.executable).resolve().parent
@@ -236,6 +245,7 @@ def run_console(server, url: str, show_window: bool, webview_module=None) -> Non
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_console_encoding()
     args = build_parser().parse_args(argv)
     resources = (args.resources or default_resource_root()).resolve()
     if args.android_worker:

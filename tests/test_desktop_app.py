@@ -80,6 +80,18 @@ class DesktopAppTests(unittest.TestCase):
         self.assertEqual(node, self.root / "runtime" / "node" / "node.exe")
         self.assertEqual(adb, self.root / "runtime" / "android-platform-tools" / "adb.exe")
 
+    def test_windows_console_streams_use_utf8(self):
+        stdout = MagicMock()
+        stderr = MagicMock()
+        with (
+            patch.object(desktop_app.sys, "platform", "win32"),
+            patch.object(desktop_app.sys, "stdout", stdout),
+            patch.object(desktop_app.sys, "stderr", stderr),
+        ):
+            desktop_app.configure_console_encoding()
+        stdout.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+        stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
     def test_web_mode_worker_command_includes_entry_script_and_resources(self):
         with (
             patch.object(desktop_app.sys, "executable", "/python"),

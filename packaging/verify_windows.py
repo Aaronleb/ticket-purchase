@@ -95,6 +95,8 @@ def report_failure(exc: Exception) -> None:
 def main() -> int:
     if os.name != "nt":
         raise RuntimeError("Windows zip 验证必须在 Windows 上运行")
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")
     if not ARCHIVE.is_file():
         raise FileNotFoundError(f"未找到 {ARCHIVE}，请先运行 packaging/build_windows.ps1")
     shutil.rmtree(VERIFY, ignore_errors=True)
