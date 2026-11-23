@@ -40,9 +40,14 @@ function Get-Dependency([string]$Name) {
 }
 
 function Invoke-Checked([string]$Name, [scriptblock]$Command) {
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Name 失败，退出代码 $LASTEXITCODE"
+    $output = & $Command 2>&1
+    $exitCode = $LASTEXITCODE
+    $output | ForEach-Object { Write-Host $_ }
+    if ($exitCode -ne 0) {
+        $tail = ($output | Select-Object -Last 60 | Out-String)
+        $escaped = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+        Write-Host "::error::$escaped"
+        throw "$Name 失败，退出代码 $exitCode"
     }
 }
 
