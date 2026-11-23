@@ -5,6 +5,8 @@ import threading
 
 import pytest
 
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="PTY 常驻会话仅在 POSIX 平台可用")
+
 from adb_session import AdbSessionError, AdbShellSession
 
 

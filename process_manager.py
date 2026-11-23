@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import queue
-import signal
 import subprocess
 import threading
 import time
 from collections import deque
 from pathlib import Path
+
+from process_utils import background_popen_kwargs, terminate_process_tree
 
 
 class TaskError(RuntimeError):
@@ -118,7 +119,7 @@ class ProcessManager:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
-                    start_new_session=True,
+                    **background_popen_kwargs(),
                 )
             except (OSError, ValueError) as exc:
                 self._task = task
@@ -188,18 +189,7 @@ class ProcessManager:
             self._message = "正在停止任务"
         self._append_log("── 正在停止进程组 ──")
         self._publish_status()
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            proc.wait(timeout=4)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait(timeout=2)
+        terminate_process_tree(proc)
         return self.snapshot()
 
     def complete_login(self, signal_path: Path | str) -> dict:

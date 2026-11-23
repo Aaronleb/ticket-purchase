@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import socket
 import subprocess
 import threading
 import time
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+from process_utils import background_popen_kwargs, terminate_process_tree
 
 
 def available_port() -> int:
@@ -81,7 +82,7 @@ class AppiumService:
                     stdout=self._log_handle,
                     stderr=subprocess.STDOUT,
                     env=environment,
-                    start_new_session=True,
+                    **background_popen_kwargs(),
                 )
             except OSError as exc:
                 self._close_log()
@@ -110,18 +111,7 @@ class AppiumService:
         with self._lock:
             proc = self._proc
         if proc is not None and proc.poll() is None:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                proc.wait(timeout=4)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                proc.wait(timeout=2)
+            terminate_process_tree(proc)
         with self._lock:
             self._close_log()
             if self._state != "error":

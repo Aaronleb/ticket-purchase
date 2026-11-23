@@ -202,5 +202,6 @@ docs/plans/2026-11-07-android-dmg-implementation.md
 # 本地 Web 控制台与桌面应用
 .runtime/
 !packaging/DamaiAndroid.spec
+!packaging/DamaiAndroidWindows.spec
 
 # 注意：tools/damai_ocr 现为 Python 源码（RapidOCR 实现），需要纳入版本管理

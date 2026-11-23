@@ -54,8 +54,30 @@ class DesktopAppTests(unittest.TestCase):
             self.assertEqual(desktop_app.os.environ["ANDROID_SDK_ROOT"], str(adb.parent))
             self.assertEqual(
                 desktop_app.os.environ["PATH"],
-                f"{node.parent}:{adb.parent}:/usr/bin",
+                desktop_app.os.pathsep.join([str(node.parent), str(adb.parent), "/usr/bin"]),
             )
+
+    def test_windows_data_root_uses_local_app_data(self):
+        with (
+            patch.object(desktop_app.sys, "platform", "win32"),
+            patch.dict(desktop_app.os.environ, {"LOCALAPPDATA": str(self.root)}, clear=True),
+        ):
+            self.assertEqual(desktop_app.default_data_root(), self.root / "DamaiAndroid")
+
+    def test_windows_packaged_resource_root_is_executable_directory(self):
+        executable = self.root / "DamaiAndroid" / "DamaiAndroid.exe"
+        with (
+            patch.object(desktop_app.sys, "platform", "win32"),
+            patch.object(desktop_app.sys, "executable", str(executable)),
+            patch.object(desktop_app.sys, "frozen", True, create=True),
+        ):
+            self.assertEqual(desktop_app.default_resource_root(), executable.parent.resolve())
+
+    def test_windows_runtime_uses_exe_files(self):
+        with patch.object(desktop_app.sys, "platform", "win32"):
+            node, adb = desktop_app.runtime_executables(self.root)
+        self.assertEqual(node, self.root / "runtime" / "node" / "node.exe")
+        self.assertEqual(adb, self.root / "runtime" / "android-platform-tools" / "adb.exe")
 
     def test_web_mode_worker_command_includes_entry_script_and_resources(self):
         with (
@@ -109,7 +131,12 @@ class DesktopAppTests(unittest.TestCase):
         webview = ModuleType("webview")
         webview.create_window = MagicMock(return_value=window)
         webview.start = MagicMock()
-        with patch("desktop_app.signal.signal"), patch("desktop_app.install_native_quit_handler") as quit_handler, patch("desktop_app.install_window_close_guard") as close_guard:
+        with (
+            patch.object(desktop_app.sys, "platform", "darwin"),
+            patch("desktop_app.signal.signal"),
+            patch("desktop_app.install_native_quit_handler") as quit_handler,
+            patch("desktop_app.install_window_close_guard") as close_guard,
+        ):
             desktop_app.run_console(server, "http://127.0.0.1:8765", True, webview)
         webview.create_window.assert_called_once_with(
             "大麦安卓抢票",
@@ -121,6 +148,22 @@ class DesktopAppTests(unittest.TestCase):
         close_guard.assert_called_once_with(window)
         webview.start.assert_called_once_with(quit_handler, (window,))
         server.serve_forever.assert_called_once_with()
+        server.shutdown.assert_called_once_with()
+
+    def test_windows_window_mode_does_not_load_appkit(self):
+        server = MagicMock()
+        webview = ModuleType("webview")
+        webview.create_window = MagicMock(return_value=MagicMock())
+        webview.start = MagicMock()
+        with (
+            patch.object(desktop_app.sys, "platform", "win32"),
+            patch("desktop_app.signal.signal"),
+            patch("desktop_app.install_native_quit_handler") as quit_handler,
+            patch("desktop_app.install_window_close_guard"),
+        ):
+            desktop_app.run_console(server, "http://127.0.0.1:8765", True, webview)
+        webview.start.assert_called_once_with()
+        quit_handler.assert_not_called()
         server.shutdown.assert_called_once_with()
 
     def test_window_start_failure_stops_server(self):

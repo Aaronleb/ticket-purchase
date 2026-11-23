@@ -1,0 +1,63 @@
+name: Build Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/build-windows.yml
+      - packaging/**
+      - desktop_app.py
+      - appium_service.py
+      - process_manager.py
+      - process_utils.py
+      - adb_session.py
+      - requirements*.txt
+      - tests/**
+      - damai_appium/**
+      - static/**
+      - resources/**
+      - app.py
+      - android_*.py
+      - config_store.py
+      - flip_watch.py
+      - scrcpy_stream.py
+      - time_sync.py
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Build and verify Windows package
+        shell: pwsh
+        run: ./packaging/build_windows.ps1
+
+      - name: Upload verification logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DamaiAndroid-windows-verification-logs
+          path: build/verify-windows/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DamaiAndroid-windows-x64
+          path: |
+            dist/DamaiAndroid-windows-x64.zip
+            dist/DamaiAndroid-windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

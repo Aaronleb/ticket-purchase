@@ -1,6 +1,31 @@
 # 大麦 PC / 安卓抢票工具
 
-本目录是唯一项目目录，包含 PC 与安卓抢票脚本、本地 Web 控制台、macOS 独立窗口应用及 DMG 打包文件。
+本目录是唯一项目目录，包含 PC 与安卓抢票脚本、本地 Web 控制台、macOS / Windows 独立窗口应用及打包文件。
+
+## Windows 免安装安卓版
+
+Windows 包面向 Windows 10/11 x64，内嵌 Python、Node.js、ADB、Appium 和 UiAutomator2。独立窗口使用系统 Microsoft Edge WebView2 Runtime，Windows 10/11 通常已预装。
+
+GitHub Actions 的 `Build Windows package` 工作流会构建、验证并上传 `DamaiAndroid-windows-x64.zip` 和 SHA-256 文件。可从对应运行的 Artifacts 区域下载，也可手动运行工作流。
+
+在 Windows 开发机上安装 Python 3.12 并加入 `PATH`，然后本地构建：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
+```
+
+脚本使用 `build\windows-venv` 安装构建依赖，产物为 `dist\DamaiAndroid-windows-x64.zip`。构建需要联网下载 `packaging/dependencies.env` 中固定版本和校验值对应的依赖。
+
+用户使用顺序：
+
+1. 完整解压 zip，保留 `DamaiAndroid` 目录内的全部文件，双击 `DamaiAndroid.exe`。
+2. 当前测试版没有 Authenticode 签名，SmartScreen 可能提示；确认文件来源后选择“更多信息”→“仍要运行”。
+3. 手机开启 USB 调试并连接电脑，在手机上允许调试授权。
+4. 在大麦 App 登录并完成原生预约，提前选好目标场次、票档和观演人，然后停在目标演出详情页。
+5. 在控制台检测设备，填写与预约一致的购票数量和北京时间抢购时间。首次使用保持自动提交关闭，并按提示完成三页按钮模板校准。
+6. 环境检查通过后开始抢票。关闭窗口会停止抢票 worker、控制台和 Appium，订单结果以大麦 App 的订单记录为准。
+
+配置保存在 `%LOCALAPPDATA%\DamaiAndroid\config.jsonc`，日志位于同目录的 `logs\`。升级应用不会主动覆盖用户配置。安卓功能限制、极速模式和校准要求与 Mac 版相同。
 
 ## Mac DMG 安卓版
 
@@ -77,7 +102,7 @@ appium --address 127.0.0.1 --port 4723
 
 页面展示的是进程状态，不代表订单结果。观演人必须显示已勾选；无论是否开启自动提交，都要在大麦订单记录中确认是否生成待支付订单，并及时处理。
 
-## 测试与 DMG 验证
+## 测试与打包验证
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
@@ -92,6 +117,12 @@ appium --address 127.0.0.1 --port 4723
 .venv/bin/python packaging/verify_dmg.py --early-exit
 ```
 
+Windows 构建脚本会自动从最终 zip 解压并做隔离启动验证，也可手动重复：
+
+```powershell
+build\windows-venv\Scripts\python.exe packaging\verify_windows.py
+```
+
 验证脚本使用独立测试数据目录和 ADB 端口，不启动真实抢票。真机验证需要单独连接已授权的安卓设备。
 
 ## 项目结构
@@ -102,9 +133,9 @@ ticket-purchase/
 ├── damai_appium/      # 安卓抢票
 ├── static/            # 本地控制台页面
 ├── tests/             # 控制台与抢票测试
-├── packaging/         # DMG 构建和验证
+├── packaging/         # macOS / Windows 构建和验证
 ├── docs/              # 设计与截图
 ├── app.py             # Web 控制台
-├── desktop_app.py     # macOS 独立窗口与 worker 入口
+├── desktop_app.py     # 桌面独立窗口与 worker 入口
 └── start_web.sh       # 开发模式启动
 ```

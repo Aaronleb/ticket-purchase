@@ -19,12 +19,26 @@ APP_VERSION = "1.0.0"
 
 def default_resource_root() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent.parent / "Resources"
+        executable_dir = Path(sys.executable).resolve().parent
+        if sys.platform == "darwin":
+            return executable_dir.parent / "Resources"
+        return executable_dir
     return Path(__file__).resolve().parent / "packaging" / "runtime"
 
 
 def default_data_root() -> Path:
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        return base / "DamaiAndroid"
     return Path.home() / "Library" / "Application Support" / "DamaiAndroid"
+
+
+def runtime_executables(resources: Path) -> tuple[Path, Path]:
+    runtime = resources / "runtime"
+    if sys.platform == "win32":
+        return runtime / "node" / "node.exe", runtime / "android-platform-tools" / "adb.exe"
+    return runtime / "node" / "bin" / "node", runtime / "android-platform-tools" / "adb"
 
 
 def rewrite_appium_manifest(destination: Path) -> None:
@@ -109,7 +123,7 @@ def run_android_worker() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="大麦安卓抢票 Mac 应用")
+    parser = argparse.ArgumentParser(description="大麦安卓抢票桌面应用")
     parser.add_argument("--android-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-browser", "--no-window", dest="no_window", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=0)
@@ -205,7 +219,10 @@ def run_console(server, url: str, show_window: bool, webview_module=None) -> Non
         install_window_close_guard(window)
         if not stopping:
             logging.info("正在显示应用窗口")
-            webview_module.start(install_native_quit_handler, (window,))
+            if sys.platform == "darwin":
+                webview_module.start(install_native_quit_handler, (window,))
+            else:
+                webview_module.start()
             logging.info("窗口事件循环已结束")
     except Exception:
         logging.exception("应用窗口运行失败")
@@ -237,8 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     runtime = resources / "runtime"
-    node_path = runtime / "node" / "bin" / "node"
-    adb_path = runtime / "android-platform-tools" / "adb"
+    node_path, adb_path = runtime_executables(resources)
     configure_runtime_environment(node_path, adb_path)
 
     try:

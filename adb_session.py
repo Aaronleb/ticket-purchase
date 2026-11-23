@@ -13,16 +13,21 @@
   导致 select 永远等不到），必须底层 os.read 自行按行切分。
 
 会话异常自动重建一次，仍失败抛 AdbSessionError，调用方退回单次调用。
+Windows 没有 PTY，调用方会直接使用单次 adb 调用。
 """
 from __future__ import annotations
 
 import os
-import pty
 import selectors
 import shlex
 import subprocess
 import time
 import uuid
+
+try:
+    import pty
+except ImportError:
+    pty = None
 
 
 class AdbSessionError(RuntimeError):
@@ -39,6 +44,8 @@ class PtyTransport:
     """
 
     def __init__(self, device: str, adb: str = "adb"):
+        if pty is None:
+            raise AdbSessionError("当前平台不支持 PTY，请使用单次 adb 调用")
         import termios
 
         master, slave = pty.openpty()
