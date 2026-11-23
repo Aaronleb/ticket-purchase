@@ -37,8 +37,8 @@ def test_terminate_process_tree_uses_posix_process_group():
     proc.poll.return_value = None
     with (
         patch("process_utils.os.name", "posix"),
-        patch("process_utils.os.getpgid", return_value=123),
-        patch("process_utils.os.killpg") as killpg,
+        patch("process_utils.os.getpgid", return_value=123, create=True),
+        patch("process_utils.os.killpg", create=True) as killpg,
     ):
         process_utils.terminate_process_tree(proc)
     killpg.assert_called_once_with(123, process_utils.signal.SIGTERM)

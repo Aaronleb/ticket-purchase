@@ -86,7 +86,21 @@ $env:npm_config_cache = Join-Path $Build "npm-cache-windows"
 Invoke-Checked "安装 Python 依赖" {
     & $Python -m pip install -r requirements.txt -r requirements-build.txt
 }
-Invoke-Checked "运行完整测试集" { & $Python -m pytest tests -q --no-cov }
+$TestResults = Join-Path $Build "windows-test-results.xml"
+& $Python -m pytest tests -q --no-cov "--junitxml=$TestResults"
+$TestExitCode = $LASTEXITCODE
+if ($TestExitCode -ne 0) {
+    if (Test-Path $TestResults) {
+        [xml]$TestXml = Get-Content -LiteralPath $TestResults -Raw
+        $FailedTests = @($TestXml.SelectNodes("//testcase[failure or error]") | ForEach-Object {
+            "$($_.classname)::$($_.name)"
+        })
+        if ($FailedTests.Count -gt 0) {
+            Write-Host "::error::Windows 测试失败：$($FailedTests -join '，')"
+        }
+    }
+    throw "运行完整测试集失败，退出代码 $TestExitCode"
+}
 
 $NodeArchive = Join-Path $Downloads "node-v$NodeVersion-win-x64.zip"
 $AndroidArchive = Join-Path $Downloads "platform-tools-latest-windows.zip"
