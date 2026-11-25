@@ -20,6 +20,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+$buildDir = Join-Path (Split-Path -Parent $PSScriptRoot) "build"
+New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+try { Stop-Transcript | Out-Null } catch { }
+Start-Transcript -Path (Join-Path $buildDir "verify.log") -Force | Out-Null
+trap {
+    $details = $_ | Out-String
+    Write-Host $details
+    Set-Content -LiteralPath (Join-Path $buildDir "verify-error.txt") -Value $details -Encoding UTF8
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
+}
+
 $zip = (Resolve-Path -LiteralPath $ZipPath).Path
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ("damai-verify-" + [guid]::NewGuid().ToString("N"))
 $process = $null
@@ -106,3 +118,5 @@ finally {
     }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $work
 }
+
+try { Stop-Transcript | Out-Null } catch { }

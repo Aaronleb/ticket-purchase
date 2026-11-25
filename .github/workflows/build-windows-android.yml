@@ -64,13 +64,51 @@ jobs:
           restore-keys: |
             win-app-deps-
 
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt -r requirements-build.txt *>&1 | Tee-Object -FilePath build/install.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          python -m unittest discover -s tests -v *>&1 | Tee-Object -FilePath build/unittest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest tests/test_damai_app_v2.py -q --no-cov *>&1 | Tee-Object -FilePath build/pytest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build portable package
         shell: pwsh
-        run: pwsh -NoProfile -File packaging/build_windows_android.ps1
+        run: |
+          pwsh -NoProfile -File packaging/build_windows_android.ps1 -SkipInstall -SkipTests *>&1 | Tee-Object -FilePath build/build-run.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify package from zip
         shell: pwsh
-        run: pwsh -NoProfile -File packaging/verify_windows_package.ps1 -ZipPath dist/DamaiAndroid-windows-x64.zip
+        run: |
+          pwsh -NoProfile -File packaging/verify_windows_package.ps1 -ZipPath dist/DamaiAndroid-windows-x64.zip *>&1 | Tee-Object -FilePath build/verify-run.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-android-build-log
+          path: |
+            build/install.log
+            build/unittest.log
+            build/pytest.log
+            build/build.log
+            build/build-run.log
+            build/build-error.txt
+            build/verify.log
+            build/verify-run.log
+            build/verify-error.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Package summary
         shell: pwsh

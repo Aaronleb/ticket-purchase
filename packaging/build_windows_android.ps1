@@ -13,7 +13,8 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$SkipInstall
 )
 
 Set-StrictMode -Version Latest
@@ -22,6 +23,23 @@ $ProgressPreference = "SilentlyContinue"
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $Root
+
+$build = Join-Path $Root "build"
+New-Item -ItemType Directory -Force -Path $build | Out-Null
+$transcript = Join-Path $build "build.log"
+$errorLog = Join-Path $build "build-error.txt"
+Remove-Item -LiteralPath $errorLog -Force -ErrorAction SilentlyContinue
+try { Stop-Transcript | Out-Null } catch { }
+Start-Transcript -Path $transcript -Force | Out-Null
+
+# 把终止错误写进文件，便于 Actions 失败时下载 artifact 排查
+trap {
+    $details = $_ | Out-String
+    Write-Host $details
+    Set-Content -LiteralPath $errorLog -Value $details -Encoding UTF8
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
+}
 
 function Write-Step([string]$Message) {
     Write-Host "`n==> $Message"
@@ -86,7 +104,6 @@ $platformToolsSha = Get-RequiredValue $dependencies "PLATFORM_TOOLS_WINDOWS_SHA2
 $appiumVersion = Get-RequiredValue $dependencies "APPIUM_VERSION"
 $uiautomator2Version = Get-RequiredValue $dependencies "UIAUTOMATOR2_VERSION"
 
-$build = Join-Path $Root "build"
 $downloads = Join-Path $build "downloads-windows"
 $runtime = Join-Path $build "runtime-windows"
 $appDist = Join-Path $build "app-windows"
@@ -98,9 +115,11 @@ New-Item -ItemType Directory -Force -Path $downloads, $dist | Out-Null
 $env:PYINSTALLER_CONFIG_DIR = Join-Path $build "pyinstaller-config"
 $env:npm_config_cache = Join-Path $build "npm-cache"
 
-Write-Step "Install Python dependencies"
-python -m pip install --disable-pip-version-check --no-input -r requirements.txt -r requirements-build.txt
-if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+if (-not $SkipInstall) {
+    Write-Step "Install Python dependencies"
+    python -m pip install --disable-pip-version-check --no-input -r requirements.txt -r requirements-build.txt
+    if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+}
 
 if (-not $SkipTests) {
     Write-Step "Run unit tests"
@@ -199,3 +218,4 @@ Write-Host "Done:"
 Write-Host "  directory $appDir"
 Write-Host "  archive   $archive ($sizeMb MB)"
 Write-Host "Copy the zip to Windows 10/11 x64, extract it and run DamaiAndroid.exe."
+try { Stop-Transcript | Out-Null } catch { }
