@@ -197,6 +197,18 @@ def run_self_check(resources: Path) -> int:
                 checks.append(("webview_backend", False, repr(exc)))
     except Exception as exc:  # noqa: BLE001 - 自检要报告具体缺失项
         checks.append(("webview", False, repr(exc)))
+
+    try:
+        import contextlib
+        import io
+
+        import ocr_tool
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            ocr_tool._get_engine()
+        checks.append(("ocr", True, "rapidocr ready"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(("ocr", False, repr(exc)))
     ok = all(item[1] for item in checks)
     print(
         json.dumps(
