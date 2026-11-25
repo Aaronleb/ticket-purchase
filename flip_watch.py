@@ -57,6 +57,9 @@ class _DaemonOcr:
 
     @classmethod
     def texts(cls, crop_path: str, ocr_tool: Path) -> list[str]:
+        if getattr(sys, "frozen", False):
+            # 打包后不能再启动 tools/damai_ocr 子进程，改用进程内识别
+            return _oneshot_texts(crop_path, ocr_tool)
         if cls._tool != ocr_tool:
             cls._proc = None  # 工具路径变了，旧进程不用了
             cls._tool = ocr_tool
@@ -93,6 +96,10 @@ class _DaemonOcr:
 
 
 def _oneshot_texts(crop_path: str, ocr_tool: Path) -> list[str]:
+    if getattr(sys, "frozen", False):
+        import ocr_tool
+
+        return [text for _x, _y, _score, text in ocr_tool.recognize(crop_path)]
     try:
         result = subprocess.run(
             [sys.executable, str(ocr_tool), crop_path],

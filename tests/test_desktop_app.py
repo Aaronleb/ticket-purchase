@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -54,8 +55,42 @@ class DesktopAppTests(unittest.TestCase):
             self.assertEqual(desktop_app.os.environ["ANDROID_SDK_ROOT"], str(adb.parent))
             self.assertEqual(
                 desktop_app.os.environ["PATH"],
-                f"{node.parent}:{adb.parent}:/usr/bin",
+                desktop_app.os.pathsep.join(
+                    [str(node.parent), str(adb.parent), "/usr/bin"]
+                ),
             )
+
+    def test_runtime_binary_paths_use_windows_layout(self):
+        with patch.object(desktop_app, "IS_WINDOWS", True):
+            node, adb = desktop_app.runtime_binary_paths(self.root)
+        self.assertEqual(node, self.root / "node" / "node.exe")
+        self.assertEqual(adb, self.root / "android-platform-tools" / "adb.exe")
+
+    def test_runtime_binary_paths_use_posix_layout(self):
+        with patch.object(desktop_app, "IS_WINDOWS", False):
+            node, adb = desktop_app.runtime_binary_paths(self.root)
+        self.assertEqual(node, self.root / "node" / "bin" / "node")
+        self.assertEqual(adb, self.root / "android-platform-tools" / "adb")
+
+    def test_windows_data_root_uses_local_appdata(self):
+        with (
+            patch.object(desktop_app, "IS_WINDOWS", True),
+            patch.dict(desktop_app.os.environ, {"LOCALAPPDATA": "/local/appdata"}, clear=True),
+        ):
+            self.assertEqual(
+                desktop_app.default_data_root(),
+                Path("/local/appdata") / "DamaiAndroid",
+            )
+
+    def test_self_check_reports_missing_runtime(self):
+        with patch("builtins.print") as printer:
+            code = desktop_app.run_self_check(self.root)
+        self.assertEqual(code, 1)
+        payload = json.loads(printer.call_args.args[0])
+        details = {item["name"]: item["ok"] for item in payload["checks"]}
+        self.assertFalse(payload["ok"])
+        self.assertFalse(details["node"])
+        self.assertFalse(details["adb"])
 
     def test_web_mode_worker_command_includes_entry_script_and_resources(self):
         with (
@@ -119,7 +154,11 @@ class DesktopAppTests(unittest.TestCase):
             min_size=(960, 680),
         )
         close_guard.assert_called_once_with(window)
-        webview.start.assert_called_once_with(quit_handler, (window,))
+        if desktop_app.IS_WINDOWS:
+            webview.start.assert_called_once_with()
+            quit_handler.assert_not_called()
+        else:
+            webview.start.assert_called_once_with(quit_handler, (window,))
         server.serve_forever.assert_called_once_with()
         server.shutdown.assert_called_once_with()
 

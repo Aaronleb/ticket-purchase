@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -510,7 +511,9 @@ class DamaiBot:
         print("[TIMING] " + json.dumps(payload, ensure_ascii=False))
 
     # ---------- 屏幕识别：截图 + OCR ----------
-    def _screenshot(self, path="/tmp/damai_screen.png"):
+    def _screenshot(self, path=None):
+        if path is None:
+            path = str(Path(tempfile.gettempdir()) / "damai_screen.png")
         with open(path, "wb") as handle:
             subprocess.run(
                 ["adb", "-s", self.config.device_name, "exec-out", "screencap", "-p"],
@@ -520,9 +523,15 @@ class DamaiBot:
 
     def _ocr(self):
         """返回 [(x, y, 置信度, 文本)]；失败时返回空列表。"""
+        screenshot = self._screenshot()
+        if getattr(sys, "frozen", False):
+            # 打包后 sys.executable 是应用本体，只能进程内识别
+            import ocr_tool
+
+            return ocr_tool.recognize(screenshot)
         try:
             result = subprocess.run(
-                [sys.executable, str(OCR_TOOL), self._screenshot()],
+                [sys.executable, str(OCR_TOOL), screenshot],
                 capture_output=True, text=True, timeout=60,
             )
         except (OSError, subprocess.SubprocessError) as exc:

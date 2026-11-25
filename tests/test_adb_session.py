@@ -110,12 +110,13 @@ def test_shell_prefix_is_stripped(mocker):
     assert shell.commands[-1] == "wm size"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="PTY 仅 POSIX 平台可用")
 def test_pty_transport_spawns_adb_shell(mocker):
     import os
     import termios
 
     master, slave = os.pipe()
-    mocker.patch("adb_session.pty.openpty", return_value=(master, slave))
+    mocker.patch("pty.openpty", return_value=(master, slave))
     mocker.patch.object(termios, "tcgetattr", return_value=[0, 1, 2, 3, 4, 5, 6])
     mocker.patch.object(termios, "tcsetattr")
     popen = mocker.patch("adb_session.subprocess.Popen")

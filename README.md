@@ -73,6 +73,29 @@ python3 -m venv .venv
 
 工作流会缓存嵌入式 Python 和 Chrome for Testing 下载，并用包内自带的 `python.exe` 做导入冒烟测试（`selenium`、`android_prewarm`、`app`），失败时不会产出包。
 
+## Windows 免安装包（安卓版）
+
+`.github/workflows/build-windows-android.yml` 在 GitHub Actions 的 Windows 机器上用 PyInstaller 构建安卓版：
+
+1. 推送到 `feature_yuyue` 分支，或手动触发 `Build Windows Android App`。
+2. 等待构建与验证步骤通过。
+3. 下载 Artifact `DamaiAndroid-windows-x64`，解压后双击 `DamaiAndroid.exe`。
+
+本机 Windows 也可以直接构建：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_windows_android.ps1
+```
+
+产物为 `dist/DamaiAndroid-windows-x64.zip`，包内自带 Python 3.12、Node.js、ADB、Appium 3.9 和 UiAutomator2 驱动，目标机不需要安装任何依赖。配置、日志和首次启动时复制的 Appium 驱动保存在 `%LOCALAPPDATA%\DamaiAndroid`。
+
+- 窗口由系统 WebView2 渲染：Windows 11 已内置，Windows 10 可能需安装 Microsoft Edge WebView2 Runtime。
+- 程序未做代码签名，首次运行可能触发 SmartScreen，需要选择“更多信息 → 仍要运行”。
+- 工作流会从最终 zip 隔离启动应用，验证控制台、内置 Appium 和安卓配置接口可用，不连接真机、不执行真实抢票。
+- 关闭窗口会停止抢票任务、控制台和内置 Appium。
+
+macOS DMG 的构建流程（`packaging/build_dmg.sh`、`packaging/DamaiAndroid.spec`）保持不变，同一个 spec 会按平台生成 `.app` 或 Windows onedir。
+
 ### PC 使用顺序
 
 1. 选择“PC”，填写演出链接、城市、日期、票价和观演人，保存配置。

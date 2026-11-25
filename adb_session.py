@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-import pty
 import selectors
 import shlex
 import subprocess
@@ -39,6 +38,7 @@ class PtyTransport:
     """
 
     def __init__(self, device: str, adb: str = "adb"):
+        import pty
         import termios
 
         master, slave = pty.openpty()

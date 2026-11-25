@@ -110,24 +110,41 @@ class AppiumService:
         with self._lock:
             proc = self._proc
         if proc is not None and proc.poll() is None:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                proc.wait(timeout=4)
-            except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                self._stop_windows_process_tree(proc)
+            else:
                 try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-                proc.wait(timeout=2)
+                try:
+                    proc.wait(timeout=4)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.wait(timeout=2)
         with self._lock:
             self._close_log()
             if self._state != "error":
                 self._state = "stopped"
                 self._message = "Appium 已停止"
         return self.snapshot()
+
+    def _stop_windows_process_tree(self, proc) -> None:
+        """Windows 没有 killpg，用 taskkill /T 结束 node 及其子进程。"""
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        try:
+            proc.wait(timeout=6)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
 
     def _ready(self) -> bool:
         try:
