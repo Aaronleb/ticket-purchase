@@ -77,7 +77,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path build | Out-Null
           python -m unittest discover -s tests -v *>&1 | Tee-Object -FilePath build/unittest.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest tests/test_damai_app_v2.py -q --no-cov *>&1 | Tee-Object -FilePath build/pytest.log
+          python -m pytest tests/test_flip_watch.py -q --no-cov *>&1 | Tee-Object -FilePath build/pytest.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build portable package
