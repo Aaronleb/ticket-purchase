@@ -151,3 +151,5 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+# 触发说明：修改本文件或 packaging/ 下文件会重新构建 Windows 安卓包。
