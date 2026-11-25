@@ -21,6 +21,11 @@ PYTHON_URLS=(
   "https://www.python.org/ftp/python/$PYTHON_VERSION/$PYTHON_EMBED"
 )
 PYTHON_BIN="${PYTHON:-$APP_DIR/.venv/bin/python}"
+# 允许 PYTHON=python 这类命令名（Windows/Git Bash 上没有 .venv）
+case "$PYTHON_BIN" in
+  */*|*\\*) ;;
+  *) PYTHON_BIN="$(command -v "$PYTHON_BIN" 2>/dev/null || printf '%s' "$PYTHON_BIN")" ;;
+esac
 # 与 chromedriver 同版本的 Chrome for Testing，保证解压即用、无需安装 Chrome
 CHROME_VERSION="${CHROME_VERSION:-158.0.8127.36}"
 CHROME_ARCHIVE="chrome-win64.zip"
@@ -29,6 +34,23 @@ OUTPUT="$APP_DIR/dist/ticket-purchase-windows-pc"
 ARCHIVE="$APP_DIR/dist/ticket-purchase-windows-pc.zip"
 
 log() { printf '\n==> %s\n' "$*"; }
+
+# Git for Windows 自带的 bash 没有 rsync，退回 cp + 清理缓存文件
+copy_tree() {
+  local source="$1" destination="$2"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a \
+      --exclude '__pycache__' \
+      --exclude '*.pyc' \
+      --exclude '.DS_Store' \
+      "$source" "$destination"
+    return 0
+  fi
+  mkdir -p "$destination"
+  cp -R "$source/." "$destination/"
+  find "$destination" -type d -name '__pycache__' -prune -exec rm -rf {} +
+  find "$destination" -type f \( -name '*.pyc' -o -name '.DS_Store' \) -delete
+}
 
 download_file() {
   local destination="$1"
@@ -149,24 +171,32 @@ fi
 } >> "$PTH_FILE"
 
 log "复制项目代码"
-rsync -a \
-  --exclude '__pycache__' \
-  --exclude '*.pyc' \
-  --exclude '.DS_Store' \
-  "$APP_DIR/damai/" "$OUTPUT/damai/"
+copy_tree "$APP_DIR/damai/" "$OUTPUT/damai/"
 for name in app.py config_store.py process_manager.py android_config.py \
             android_calibrate.py android_diagnostics.py android_environment.py \
-            time_sync.py adb_session.py activity_watch.py flip_watch.py \
-            scrcpy_stream.py; do
+            android_prewarm.py time_sync.py adb_session.py activity_watch.py \
+            flip_watch.py scrcpy_stream.py; do
   cp "$APP_DIR/$name" "$OUTPUT/$name"
 done
-rsync -a --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' \
-  "$APP_DIR/static/" "$OUTPUT/static/"
+copy_tree "$APP_DIR/static/" "$OUTPUT/static/"
 mkdir -p "$OUTPUT/tools"
 cp "$APP_DIR/tools/account_login.py" "$OUTPUT/tools/account_login.py"
 mkdir -p "$OUTPUT/damai_appium"
 for name in __init__.py config.py sale_clock.py damai_app_v2.py; do
   cp "$APP_DIR/damai_appium/$name" "$OUTPUT/damai_appium/$name"
+done
+
+# app.py 在模块级导入这些本地模块，缺一个启动就会失败
+for name in app.py config_store.py process_manager.py android_config.py \
+            android_calibrate.py android_diagnostics.py android_environment.py \
+            android_prewarm.py time_sync.py adb_session.py activity_watch.py \
+            flip_watch.py scrcpy_stream.py tools/account_login.py \
+            damai_appium/__init__.py damai_appium/config.py \
+            damai_appium/sale_clock.py damai_appium/damai_app_v2.py; do
+  if [ ! -f "$OUTPUT/$name" ]; then
+    echo "打包文件缺失：$OUTPUT/$name" >&2
+    exit 1
+  fi
 done
 
 # 不带出本机设备、场次、观演人和登录态

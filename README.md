@@ -63,6 +63,16 @@ python3 -m venv .venv
 
 该包只包含 PC 抢票组件，不包含 Appium、adb、Node.js，因此安卓入口不可用。需要完整安卓功能时请使用 macOS 的 DMG，或在 Windows 上自行安装 Appium 环境后运行源码。
 
+### 用 GitHub Actions 构建 Windows 包
+
+仓库内置 `.github/workflows/build-windows-pc.yml`，在 GitHub 的 Windows 机器上执行同一套组装脚本：
+
+1. 推送到 `feature_yuyue` 分支（或手动触发 `Build Windows PC Package`）。
+2. 打开 Actions 中该次运行，等待 `build` 任务通过。
+3. 在页面底部 Artifacts 下载 `ticket-purchase-windows-pc`，解压后得到 `ticket-purchase-windows-pc.zip`，再拷到 Windows 解压即可。
+
+工作流会缓存嵌入式 Python 和 Chrome for Testing 下载，并用包内自带的 `python.exe` 做导入冒烟测试（`selenium`、`android_prewarm`、`app`），失败时不会产出包。
+
 ### PC 使用顺序
 
 1. 选择“PC”，填写演出链接、城市、日期、票价和观演人，保存配置。
