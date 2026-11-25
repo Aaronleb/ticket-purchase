@@ -129,7 +129,7 @@ appium --address 127.0.0.1 --port 4723
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m pytest tests/test_damai_app_v2.py -q --no-cov
+.venv/bin/python -m pytest tests/test_flip_watch.py -q --no-cov
 ```
 
 从实际 DMG 做隔离启动验证：
