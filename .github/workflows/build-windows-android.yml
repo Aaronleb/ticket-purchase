@@ -37,7 +37,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -109,6 +109,28 @@ jobs:
             build/verify-error.txt
           if-no-files-found: ignore
           retention-days: 7
+
+      # 失败时把日志推到 ci-diagnostics 分支，便于在无法查看 Actions 日志时排查
+      - name: Publish failure log
+        if: failure()
+        shell: pwsh
+        run: |
+          $diag = Join-Path $env:RUNNER_TEMP "damai-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diag | Out-Null
+          Get-ChildItem -Path build -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '\.(log|txt)$' } |
+            Copy-Item -Destination $diag -Force
+          if (-not (Get-ChildItem -Path $diag)) {
+            "no logs" | Set-Content -LiteralPath (Join-Path $diag "empty.txt") -Encoding utf8
+          }
+          Set-Location $diag
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b ci-diagnostics
+          git add -A
+          git commit -q -m "ci diagnostics for run $env:GITHUB_RUN_ID"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-diagnostics
 
       - name: Package summary
         shell: pwsh
