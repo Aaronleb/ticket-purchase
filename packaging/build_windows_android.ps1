@@ -125,7 +125,7 @@ if (-not $SkipTests) {
     Write-Step "Run unit tests"
     python -m unittest discover -s tests -v
     if ($LASTEXITCODE -ne 0) { throw "unittest failed" }
-    python -m pytest tests/test_damai_app_v2.py -q --no-cov
+    python -m pytest tests/test_flip_watch.py -q --no-cov
     if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 }
 

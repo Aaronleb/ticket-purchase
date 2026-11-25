@@ -44,7 +44,7 @@ export npm_config_cache="$BUILD/npm-cache"
 "$ROOT/.venv/bin/python" -m unittest discover -s tests -v
 (
   cd "$PROJECT_ROOT"
-  "$ROOT/.venv/bin/python" -m pytest tests/test_damai_app_v2.py -q --no-cov
+  "$ROOT/.venv/bin/python" -m pytest tests/test_flip_watch.py -q --no-cov
 )
 
 download() {
