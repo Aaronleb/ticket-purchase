@@ -15,7 +15,7 @@ echo The browser will open automatically.
 echo Close this window to stop the service.
 echo.
 
-python\python.exe app.py --port 8765 --project-root "%~dp0."
+python\python.exe app.py --port 8765 --project-root "%~dp0." --pc-only
 if errorlevel 1 (
   echo.
   echo Failed to start. Make sure the package is fully extracted

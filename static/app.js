@@ -168,11 +168,12 @@ function setPlatform(platform, force = false) {
 function updateStatus(status) {
   currentStatus = { ...currentStatus, ...status };
   managedAppium = Boolean(currentStatus.managed_appium);
-  const androidOnly = (currentStatus.enabled_platforms || []).join(",") === "android";
-  $("#platform-switch").hidden = androidOnly;
+  const platforms = currentStatus.enabled_platforms || ["pc", "android"];
+  $("#platform-switch").hidden = platforms.length < 2;
   $("#android-server-field").hidden = managedAppium;
   $("#android-server-url").required = !managedAppium;
-  if (androidOnly && currentPlatform !== "android") setPlatform("android", true);
+  if (!platforms.includes("android") && currentPlatform !== "pc") setPlatform("pc", true);
+  if (!platforms.includes("pc") && currentPlatform !== "android") setPlatform("android", true);
   if (currentStatus.running && currentStatus.task) {
     const taskPlatform = currentStatus.task === "android" ? "android" : "pc";
     if (taskPlatform !== currentPlatform) setPlatform(taskPlatform, true);

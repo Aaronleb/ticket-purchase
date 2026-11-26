@@ -61,7 +61,7 @@ python3 -m venv .venv
 
 把 zip 拷到 Windows 10/11 解压，双击 `启动抢票.bat` 即可。包内使用官方嵌入式 Python 3.12、win_amd64 依赖，以及与 ChromeDriver 同版本的 Chrome for Testing，因此目标机不需要安装 Python、Chrome 或驱动；配置与 Cookie 都保存在解压目录内。
 
-该包只包含 PC 抢票组件，不包含 Appium、adb、Node.js，因此安卓入口不可用。需要完整安卓功能时请使用 macOS 的 DMG，或在 Windows 上自行安装 Appium 环境后运行源码。
+该包只包含 PC 抢票组件，不包含 Appium、adb、Node.js，因此安卓入口不可用。启动脚本会带 `--pc-only`，控制台只显示 PC 表单；需要完整安卓功能时请使用 macOS 的 DMG，或下载 `DamaiAndroid-windows-x64.zip`。
 
 ### 用 GitHub Actions 构建 Windows 包
 

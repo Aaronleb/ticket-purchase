@@ -35,6 +35,7 @@ class WebApplication:
         self,
         project_root: Path | str,
         android_only: bool = False,
+        pc_only: bool = False,
         android_config_path: Path | str | None = None,
         android_command: list[str] | None = None,
         managed_server_url: str | None = None,
@@ -50,6 +51,7 @@ class WebApplication:
         self.android_diagnostics = AndroidDiagnostics()
         self.manager = ProcessManager()
         self.android_only = android_only
+        self.pc_only = pc_only
         self.android_command = android_command
         self.runtime_status = runtime_status or (lambda: {"state": "external"})
         self.login_signal = RUNTIME_ROOT / "login.signal"
@@ -60,7 +62,11 @@ class WebApplication:
             {
                 "logged_in": self.store.cookie_path.is_file(),
                 "project_root": str(self.store.project_root),
-                "enabled_platforms": ["android"] if self.android_only else ["pc", "android"],
+                "enabled_platforms": (
+                    ["android"]
+                    if self.android_only
+                    else (["pc"] if self.pc_only else ["pc", "android"])
+                ),
                 "managed_appium": bool(self.android_store.managed_server_url),
                 "runtime": self.runtime_status(),
             }
@@ -304,6 +310,8 @@ class Handler(BaseHTTPRequestHandler):
             if method in {"POST", "PUT", "DELETE"}:
                 self._require_same_origin()
             app = self.application
+            if app.pc_only and path.startswith("/api/android"):
+                raise ConfigError("此安装包仅包含 PC 抢票功能，安卓入口不可用")
             if method == "GET" and path == "/api/status":
                 self._json(200, app.status())
             elif method == "GET" and path == "/api/config":
@@ -441,7 +449,10 @@ def main() -> int:
     parser.add_argument("--project-root", type=Path, default=default_project_root())
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--android-only", action="store_true", help="只启用安卓端，隐藏 PC 入口")
+    parser.add_argument("--pc-only", action="store_true", help="只启用 PC 端，隐藏安卓入口")
     args = parser.parse_args()
+    if args.android_only and args.pc_only:
+        parser.error("--android-only 与 --pc-only 不能同时使用")
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         parser.error("为避免远程触发抢票，只允许监听本机地址")
     if not 0 <= args.port <= 65535:
@@ -449,7 +460,10 @@ def main() -> int:
 
     try:
         server = create_server(
-            args.project_root, args.port, android_only=args.android_only
+            args.project_root,
+            args.port,
+            android_only=args.android_only,
+            pc_only=args.pc_only,
         )
     except OSError as exc:
         print(f"无法启动 Web 服务：{exc}", file=sys.stderr)

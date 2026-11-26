@@ -326,5 +326,26 @@ class AndroidApiTests(unittest.TestCase):
             packaged.server_close()
 
 
+    def test_pc_only_application_hides_android_and_rejects_android_api(self):
+        packaged = create_server(self.root, port=0, pc_only=True)
+        port = packaged.server_address[1]
+        thread = threading.Thread(target=packaged.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status = packaged.application.status()
+            self.assertEqual(status["enabled_platforms"], ["pc"])
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            connection.request("GET", "/api/android/config")
+            response = connection.getresponse()
+            payload = json.loads(response.read().decode("utf-8"))
+            connection.close()
+            self.assertEqual(response.status, 400)
+            self.assertIn("仅包含 PC", payload["error"])
+        finally:
+            packaged.shutdown()
+            packaged.server_close()
+            thread.join(timeout=2)
+
+
 if __name__ == "__main__":
     unittest.main()
