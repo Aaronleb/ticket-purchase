@@ -356,9 +356,8 @@ class AndroidApiTests(unittest.TestCase):
             ):
                 result = packaged.application.check_android()
             self.assertFalse(result["ok"])
-            self.assertEqual(
-                result["checks"][0]["message"], "node exited 1: EACCES"
-            )
+            self.assertEqual(result["checks"][0]["id"], "runtime")
+            self.assertIn("EACCES", result["checks"][0]["message"])
         finally:
             packaged.server_close()
 

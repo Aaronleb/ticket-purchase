@@ -118,12 +118,21 @@ class WebApplication:
         report = self.android_environment.check(self.android_store.load())
         runtime = self.runtime_status()
         if runtime.get("state") == "error":
-            # 服务没起来时，把 Appium 自己的报错和日志末尾带回界面，
+            # 在检查结果里单独列出内置 Appium 的失败原因和日志末尾，
             # 避免只显示 "connection refused" 这种无从下手的信息。
-            for check in report["checks"]:
-                if check["id"] == "server":
-                    check["ok"] = False
-                    check["message"] = runtime.get("message") or check["message"]
+            detail = str(runtime.get("message") or "").strip()
+            if len(detail) > 800:
+                detail = detail[:800] + "…"
+            report.setdefault("checks", []).insert(
+                0,
+                {
+                    "id": "runtime",
+                    "label": "内置 Appium",
+                    "ok": False,
+                    "message": detail or "内置 Appium 启动失败，请查看应用日志",
+                },
+            )
+            report["ok"] = False
         return report
 
     def _android_config_with_form(self, payload=None):
