@@ -56,6 +56,20 @@ try {
     $exePath = Join-Path $appDir "DamaiAndroid.exe"
     if (-not (Test-Path -LiteralPath $exePath)) { throw "Missing DamaiAndroid.exe in archive" }
 
+    Write-Host "==> Check that no local settings are packaged"
+    $projectDir = Join-Path $appDir "runtime\ticket-purchase"
+    $leaks = @()
+    foreach ($name in @("config.json", "config.jsonc", "damai_cookies.pkl", "login.signal", "flip-templates", "logs", ".runtime")) {
+        $candidate = Join-Path $projectDir $name
+        if (Test-Path -LiteralPath $candidate) { $leaks += $candidate }
+    }
+    $bundledResources = Join-Path $appDir "_internal\resources"
+    foreach ($name in @("config.json", "config.jsonc", "damai_cookies.pkl", "flip-templates")) {
+        $candidate = Join-Path $bundledResources $name
+        if (Test-Path -LiteralPath $candidate) { $leaks += $candidate }
+    }
+    if ($leaks.Count -gt 0) { throw "Packaged local settings: $($leaks -join '; ')" }
+
     Write-Host "==> Packaged self-check"
     $selfCheckRaw = & $exePath --self-check 2>&1 | Out-String
     Write-Host $selfCheckRaw.Trim()
@@ -103,6 +117,20 @@ try {
     $config = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/android/config" -TimeoutSec 5
     if ($null -eq $config) { throw "Android config endpoint returned nothing" }
     Write-Host "page and config endpoints ok"
+
+    Write-Host "==> Check Android environment (no phone required)"
+    $check = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/android/check" `
+        -Headers @{"X-Requested-With" = "fetch"} -ContentType "application/json" -Body "{}" -TimeoutSec 60
+    foreach ($item in $check.checks) {
+        Write-Host ("  {0}: {1} - {2}" -f $item.label, $item.ok, $item.message)
+    }
+    # 没接手机时 device/app 必然失败；client/server/adb 必须通过
+    foreach ($requiredId in @("client", "server", "adb")) {
+        $item = $check.checks | Where-Object { $_.id -eq $requiredId }
+        if ($null -eq $item -or -not $item.ok) {
+            throw "Android environment check failed: $requiredId"
+        }
+    }
 
     Write-Host "VERIFY OK"
 }

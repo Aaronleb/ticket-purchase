@@ -150,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--resources", type=Path, default=None)
     parser.add_argument("--data-dir", type=Path, default=None)
-    parser.add_argument("--startup-timeout", type=float, default=30)
+    parser.add_argument("--startup-timeout", type=float, default=90)
     return parser
 
 

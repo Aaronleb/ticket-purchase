@@ -181,6 +181,13 @@ New-Item -ItemType Directory -Force -Path $ticketProject | Out-Null
 foreach ($name in @("__init__.py", "config.py", "sale_clock.py", "damai_app_v2.py")) {
     Copy-Item -LiteralPath (Join-Path $Root "damai_appium\$name") -Destination $ticketProject -Force
 }
+# 只带源码，不带开发机上的配置、登录态和校准模板
+foreach ($name in @("config.json", "config.jsonc", "damai_cookies.pkl", "login.signal")) {
+    Remove-Item -LiteralPath (Join-Path $ticketProject $name) -Force -ErrorAction SilentlyContinue
+}
+foreach ($name in @("flip-templates", "logs", ".runtime", "__pycache__")) {
+    Remove-Item -LiteralPath (Join-Path $ticketProject $name) -Recurse -Force -ErrorAction SilentlyContinue
+}
 Copy-Item -LiteralPath (Join-Path $runtime "node\LICENSE") -Destination (Join-Path $runtime "NODE-LICENSE.txt") -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $runtime "THIRD_PARTY_NOTICES.md") -Force
 
@@ -200,6 +207,25 @@ Write-Step "Assemble portable directory"
 Copy-Item -LiteralPath $runtime -Destination (Join-Path $appDir "runtime") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "THIRD_PARTY_NOTICES.md") -Destination $appDir -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "windows-android\使用说明.txt") -Destination $appDir -Force
+
+# PyInstaller 会整目录带 resources/，这里再兜底清掉开发机可能留下的模板/配置
+$bundledResources = Join-Path $appDir "_internal\resources"
+foreach ($name in @("flip-templates", "logs")) {
+    Remove-Item -LiteralPath (Join-Path $bundledResources $name) -Recurse -Force -ErrorAction SilentlyContinue
+}
+$projectDir = Join-Path $appDir "runtime\ticket-purchase"
+$leaked = @()
+foreach ($name in @("config.json", "config.jsonc", "damai_cookies.pkl", "login.signal", "flip-templates", "logs", ".runtime")) {
+    $candidate = Join-Path $projectDir $name
+    if (Test-Path -LiteralPath $candidate) { $leaked += $candidate }
+}
+foreach ($name in @("config.json", "config.jsonc", "damai_cookies.pkl", "login.signal", "flip-templates")) {
+    $candidate = Join-Path $bundledResources $name
+    if (Test-Path -LiteralPath $candidate) { $leaked += $candidate }
+}
+if ($leaked.Count -gt 0) {
+    throw "包内残留本机设置：$($leaked -join '; ')"
+}
 
 Write-Step "Run packaged self-check"
 $selfCheckOutput = & $exePath --self-check 2>&1 | Out-String

@@ -89,6 +89,8 @@ powershell -ExecutionPolicy Bypass -File packaging\build_windows_android.ps1
 
 产物为 `dist/DamaiAndroid-windows-x64.zip`，包内自带 Python 3.12、Node.js、ADB、Appium 3.9 和 UiAutomator2 驱动，目标机不需要安装任何依赖。配置、日志和首次启动时复制的 Appium 驱动保存在 `%LOCALAPPDATA%\DamaiAndroid`。
 
+打包脚本会清空开发机残留：产物中不包含 `config.json`、`config.jsonc`、`damai_cookies.pkl`、校准模板、日志或 `.runtime`，首次启动就是空配置。构建和验证阶段都会检查，一旦发现残留会直接失败。已经使用过的旧版本不会被清空，需要重置时手动删除 `%LOCALAPPDATA%\DamaiAndroid`。
+
 - 窗口由系统 WebView2 渲染：Windows 11 已内置，Windows 10 可能需安装 Microsoft Edge WebView2 Runtime。
 - 程序未做代码签名，首次运行可能触发 SmartScreen，需要选择“更多信息 → 仍要运行”。
 - 工作流会从最终 zip 隔离启动应用，验证控制台、内置 Appium 和安卓配置接口可用，不连接真机、不执行真实抢票。

@@ -199,6 +199,14 @@ for name in app.py config_store.py process_manager.py android_config.py \
   fi
 done
 
+# 不带出本机的设置、Cookie、日志和校准模板；damai/ 只保留代码
+rm -f "$OUTPUT/damai/damai_cookies.pkl" "$OUTPUT/damai/login.signal"
+rm -f "$OUTPUT/damai/config.json" "$OUTPUT/damai/config.jsonc"
+rm -rf "$OUTPUT/damai/logs" "$OUTPUT/damai/flip-templates" "$OUTPUT/damai/.runtime"
+rm -f "$OUTPUT/damai_appium/config.json" "$OUTPUT/damai_appium/config.jsonc"
+rm -rf "$OUTPUT/damai_appium/flip-templates" "$OUTPUT/damai_appium/logs"
+find "$OUTPUT/damai" -maxdepth 1 -type f -name '*.log' -delete
+
 # 不带出本机设备、场次、观演人和登录态
 "$PYTHON_BIN" - "$OUTPUT/damai/config.json" <<'PY'
 import json
@@ -222,6 +230,21 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(config, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 PY
+
+# 再次确认包里没有把本机状态带出去
+for leftover in \
+  "$OUTPUT/damai/damai_cookies.pkl" \
+  "$OUTPUT/damai/login.signal" \
+  "$OUTPUT/damai/config.jsonc" \
+  "$OUTPUT/damai/flip-templates" \
+  "$OUTPUT/damai_appium/config.jsonc" \
+  "$OUTPUT/damai_appium/flip-templates" \
+  "$OUTPUT/damai_appium/logs"; do
+  if [ -e "$leftover" ]; then
+    echo "包内残留本机设置：$leftover" >&2
+    exit 1
+  fi
+done
 
 cp "$PACKAGING/windows/启动抢票.bat" "$OUTPUT/启动抢票.bat"
 cp "$PACKAGING/windows/使用说明.txt" "$OUTPUT/使用说明.txt"

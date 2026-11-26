@@ -15,6 +15,9 @@ hiddenimports = [
     "flip_watch",
     "scrcpy_stream",
     "ocr_tool",
+    # 控制台用 importlib.find_spec("appium") 检查 Python Appium 客户端，
+    # 冻结后不在 PYZ 里就会误报“未安装”，这里显式打包。
+    "appium",
     "av",
     "cv2",
     "adbutils",
