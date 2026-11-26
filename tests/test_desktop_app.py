@@ -53,6 +53,19 @@ class DesktopAppTests(unittest.TestCase):
         desktop_app.prepare_appium_home(self.template, self.destination)
         self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
+    def test_prepare_appium_home_recopies_when_manifest_missing(self):
+        desktop_app.prepare_appium_home(self.template, self.destination)
+        manifest = (
+            self.destination
+            / "node_modules"
+            / ".cache"
+            / "appium"
+            / "extensions.yaml"
+        )
+        manifest.unlink()
+        desktop_app.prepare_appium_home(self.template, self.destination)
+        self.assertTrue(manifest.is_file())
+
     def test_runtime_environment_points_appium_to_bundled_adb(self):
         node = self.root / "runtime" / "node" / "bin" / "node"
         adb = self.root / "runtime" / "android-platform-tools" / "adb"

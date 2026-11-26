@@ -4,6 +4,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 from urllib.request import Request, urlopen
 
 
@@ -14,12 +15,20 @@ class AndroidEnvironment:
     def check(self, config: dict) -> dict:
         checks = []
         client_ok = importlib.util.find_spec("appium") is not None
+        if getattr(sys, "frozen", False):
+            # 打包版的安卓链路只用 adb + 内置 Node Appium，不导入 Python 客户端
+            client_ok = True
+            client_message = "打包版使用内置 ADB/Appium，无需 Python 客户端"
+        else:
+            client_message = (
+                "已安装" if client_ok else "请安装项目 requirements.txt 中的依赖"
+            )
         checks.append(
             self._result(
                 "client",
                 "Python Appium 客户端",
                 client_ok,
-                "已安装" if client_ok else "请安装项目 requirements.txt 中的依赖",
+                client_message,
             )
         )
         checks.append(self._check_server(config["server_url"]))

@@ -2,6 +2,7 @@ import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
+import android_environment
 from android_environment import AndroidEnvironment
 from test_android_config import valid_android_config
 
@@ -32,6 +33,19 @@ class AndroidEnvironmentTests(unittest.TestCase):
         self.assertTrue(report["ok"])
         self.assertEqual(len(report["checks"]), 5)
         self.assertEqual(run.call_args_list[1].args[0][1:4], ["-s", "emulator-5554", "shell"])
+
+    def test_frozen_build_does_not_require_python_client(self):
+        with (
+            patch.object(android_environment.sys, "frozen", True, create=True),
+            patch("android_environment.importlib.util.find_spec", return_value=None),
+            patch("android_environment.shutil.which", return_value=None),
+            patch("android_environment.urlopen", side_effect=OSError("offline")),
+        ):
+            report = self.environment.check(self.config)
+        client = report["checks"][0]
+        self.assertEqual(client["id"], "client")
+        self.assertTrue(client["ok"])
+        self.assertIn("无需 Python", client["message"])
 
     def test_missing_adb_fails_dependent_checks(self):
         with (

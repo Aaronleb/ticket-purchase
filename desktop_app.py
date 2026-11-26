@@ -84,8 +84,12 @@ def rewrite_appium_manifest(destination: Path) -> None:
 def prepare_appium_home(template: Path, destination: Path) -> None:
     marker = destination / ".damai-app-version"
     if marker.is_file() and marker.read_text(encoding="utf-8").strip() == APP_VERSION:
-        rewrite_appium_manifest(destination)
-        return
+        try:
+            rewrite_appium_manifest(destination)
+            return
+        except (FileNotFoundError, ValueError):
+            # 数据目录被清理/杀软拦截导致文件缺失时，重新完整复制一次
+            logging.warning("Appium 目录不完整，正在重新复制")
     if not template.is_dir():
         raise FileNotFoundError(f"未找到内置 Appium 驱动：{template}")
 
