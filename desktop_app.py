@@ -8,6 +8,7 @@ import shutil
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 from app import create_server
@@ -366,14 +367,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     appium_entry = data_root / "appium-home" / "node_modules" / "appium" / "index.js"
-    service = AppiumService(
-        node_path,
-        appium_entry,
-        data_root / "appium-home",
-        logs / "appium.log",
-        startup_timeout=args.startup_timeout,
-    )
-    service.start()
+
+    def new_service() -> AppiumService:
+        return AppiumService(
+            node_path,
+            appium_entry,
+            data_root / "appium-home",
+            logs / "appium.log",
+            startup_timeout=args.startup_timeout,
+        )
+
+    service = new_service()
+    startup = service.start()
+    if startup.get("state") != "ready":
+        # 首次启动可能碰到杀软扫描、端口占用或磁盘慢，换端口重试一次
+        logging.warning("内置 Appium 首次启动未就绪：%s", startup.get("message"))
+        service.stop()
+        time.sleep(1)
+        service = new_service()
+        startup = service.start()
+    if startup.get("state") != "ready":
+        logging.error("内置 Appium 启动失败：%s", startup.get("message"))
+        print(f"内置 Appium 启动失败：{startup.get('message')}", file=sys.stderr)
     try:
         server = create_server(
             runtime / "ticket-purchase",

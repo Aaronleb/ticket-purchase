@@ -84,6 +84,25 @@ class AppiumServiceTests(unittest.TestCase):
         self.assertEqual(status["state"], "error")
         popen.assert_not_called()
 
+    def test_early_exit_includes_appium_log_tail(self):
+        self.service.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.service.log_path.write_text(
+            "[Appium] Welcome to Appium\n"
+            "[Appium] Error: listen EACCES: permission denied 127.0.0.1\n",
+            encoding="utf-8",
+        )
+        proc = self.process()
+        proc.poll.return_value = 3
+        proc.returncode = 3
+        with (
+            patch("appium_service.subprocess.Popen", return_value=proc),
+            patch.object(self.service, "_ready", return_value=False),
+        ):
+            status = self.service.start()
+        self.assertEqual(status["state"], "error")
+        self.assertIn("EACCES", status["message"])
+        self.assertIn("代码 3", status["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

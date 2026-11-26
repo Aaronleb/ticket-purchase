@@ -115,7 +115,16 @@ class WebApplication:
         return self.manager.start("grab", [sys.executable, "damai.py"], self.store.damai_dir)
 
     def check_android(self):
-        return self.android_environment.check(self.android_store.load())
+        report = self.android_environment.check(self.android_store.load())
+        runtime = self.runtime_status()
+        if runtime.get("state") == "error":
+            # 服务没起来时，把 Appium 自己的报错和日志末尾带回界面，
+            # 避免只显示 "connection refused" 这种无从下手的信息。
+            for check in report["checks"]:
+                if check["id"] == "server":
+                    check["ok"] = False
+                    check["message"] = runtime.get("message") or check["message"]
+        return report
 
     def _android_config_with_form(self, payload=None):
         """页面表单可能还没保存；把表单里的业务字段合并进配置。

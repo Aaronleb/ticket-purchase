@@ -45,7 +45,7 @@ class AppiumService:
                 code = self._proc.poll()
                 if code is not None:
                     self._state = "error"
-                    self._message = f"Appium 异常退出（代码 {code}），请查看应用日志"
+                    self._message = self._with_log_tail(f"Appium 异常退出（代码 {code}）")
             return {
                 "state": self._state,
                 "message": self._message,
@@ -95,7 +95,9 @@ class AppiumService:
                 if self._proc is not None and self._proc.poll() is not None:
                     code = self._proc.returncode
                     self._close_log()
-                    return self._fail(f"Appium 启动失败（代码 {code}），请查看应用日志")
+                    return self._fail(
+                        self._with_log_tail(f"Appium 启动失败（代码 {code}）")
+                    )
             if self._ready():
                 with self._lock:
                     self._state = "ready"
@@ -104,7 +106,7 @@ class AppiumService:
             time.sleep(0.1)
 
         self.stop()
-        return self._fail("Appium 启动超时，请查看应用日志")
+        return self._fail(self._with_log_tail("Appium 启动超时"))
 
     def stop(self) -> dict:
         with self._lock:
@@ -154,6 +156,23 @@ class AppiumService:
             return isinstance(payload, dict) and payload.get("value", {}).get("ready") is True
         except Exception:
             return False
+
+    def _with_log_tail(self, message: str, limit: int = 8) -> str:
+        """把 appium.log 末尾几行拼进错误信息，界面和日志里能直接看到原因。"""
+        try:
+            lines = [
+                line.rstrip()
+                for line in self.log_path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+                if line.strip()
+            ]
+        except OSError:
+            return message
+        if not lines:
+            return f"{message}，日志为空：{self.log_path}"
+        tail = "\n".join(lines[-limit:])
+        return f"{message}\n日志末尾（{self.log_path}）：\n{tail}"
 
     def _fail(self, message: str) -> dict:
         with self._lock:

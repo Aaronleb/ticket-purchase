@@ -326,6 +326,42 @@ class AndroidApiTests(unittest.TestCase):
             packaged.server_close()
 
 
+    def test_check_android_surfaces_managed_appium_error(self):
+        packaged = create_server(
+            self.root,
+            port=0,
+            android_config_path=self.root / "data" / "config.jsonc",
+            managed_server_url="http://127.0.0.1:1",
+            runtime_status=lambda: {
+                "state": "error",
+                "message": "node exited 1: EACCES",
+            },
+        )
+        try:
+            report = {
+                "ok": False,
+                "checks": [
+                    {
+                        "id": "server",
+                        "label": "Appium 服务",
+                        "ok": False,
+                        "message": "connection refused",
+                    }
+                ],
+            }
+            with patch.object(
+                packaged.application.android_environment,
+                "check",
+                return_value=report,
+            ):
+                result = packaged.application.check_android()
+            self.assertFalse(result["ok"])
+            self.assertEqual(
+                result["checks"][0]["message"], "node exited 1: EACCES"
+            )
+        finally:
+            packaged.server_close()
+
     def test_pc_only_application_hides_android_and_rejects_android_api(self):
         packaged = create_server(self.root, port=0, pc_only=True)
         port = packaged.server_address[1]
