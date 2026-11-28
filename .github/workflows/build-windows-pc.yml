@@ -1,0 +1,99 @@
+name: Build Windows PC Package
+
+# 在 GitHub Actions 的 Windows 机器上组装免安装 PC 包：
+#   dist/ticket-purchase-windows-pc/      解压即用的目录
+#   dist/ticket-purchase-windows-pc.zip   下载分发的压缩包
+# 包内自带嵌入式 Python、Windows 依赖和 Chrome for Testing，目标机无需安装任何软件。
+
+on:
+  push:
+    branches: [main, master, feature_yuyue]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/build-windows-pc.yml"
+      - "packaging/**"
+      - "app.py"
+      - "config_store.py"
+      - "process_manager.py"
+      - "android_config.py"
+      - "android_calibrate.py"
+      - "android_diagnostics.py"
+      - "android_environment.py"
+      - "android_prewarm.py"
+      - "time_sync.py"
+      - "adb_session.py"
+      - "activity_watch.py"
+      - "flip_watch.py"
+      - "scrcpy_stream.py"
+      - "damai/**"
+      - "damai_appium/**"
+      - "static/**"
+      - "tools/account_login.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12.10"
+  CHROME_VERSION: "158.0.8127.36"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # 缓存嵌入式 Python 与 Chrome for Testing 下载，避免每次重新拉取大文件
+      - name: Cache portable runtime downloads
+        uses: actions/cache@v4
+        with:
+          path: packaging/downloads
+          key: win-deps-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CHROME_VERSION }}-${{ hashFiles('packaging/requirements-windows-pc.txt') }}
+          restore-keys: |
+            win-deps-${{ runner.os }}-
+
+      - name: Build portable package
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHON="$(command -v python)"
+          export PYTHON_VERSION CHROME_VERSION
+          bash packaging/build_windows_portable.sh
+
+      # 用包内自带的 python.exe 验证依赖与入口模块可用
+      - name: Smoke test embedded runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/ticket-purchase-windows-pc
+          ./python/python.exe -c "import sys, selenium, android_prewarm, app; print('python', sys.version.split()[0]); print('selenium', selenium.__version__); print('chrome', open('browser/VERSION', encoding='utf-8').read().strip())"
+          test -f browser/chrome-win64/chrome.exe
+          test -f browser/chromedriver-win64/chromedriver.exe
+
+      - name: Package summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          du -sh dist/ticket-purchase-windows-pc dist/ticket-purchase-windows-pc.zip
+          echo "### Windows PC 包已构建" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 目录：\`dist/ticket-purchase-windows-pc/\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 压缩包：\`dist/ticket-purchase-windows-pc.zip\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 用法：解压后双击 \`启动抢票.bat\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticket-purchase-windows-pc
+          path: dist/ticket-purchase-windows-pc/
+          if-no-files-found: error
+          retention-days: 30

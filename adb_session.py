@@ -13,7 +13,6 @@
   导致 select 永远等不到），必须底层 os.read 自行按行切分。
 
 会话异常自动重建一次，仍失败抛 AdbSessionError，调用方退回单次调用。
-Windows 没有 PTY，调用方会直接使用单次 adb 调用。
 """
 from __future__ import annotations
 
@@ -23,11 +22,6 @@ import shlex
 import subprocess
 import time
 import uuid
-
-try:
-    import pty
-except ImportError:
-    pty = None
 
 
 class AdbSessionError(RuntimeError):
@@ -44,8 +38,7 @@ class PtyTransport:
     """
 
     def __init__(self, device: str, adb: str = "adb"):
-        if pty is None:
-            raise AdbSessionError("当前平台不支持 PTY，请使用单次 adb 调用")
+        import pty
         import termios
 
         master, slave = pty.openpty()
@@ -124,11 +117,15 @@ class AdbShellSession:
         if t is not None:
             t.close()
 
-    def run(self, args, timeout: float = 10.0) -> str:
+    def run(self, args, timeout: float = 10.0, replay: bool = True) -> str:
         """在设备 shell 里执行命令，返回 stdout 文本。
 
         args 与 ``adb -s <device>`` 的用法一致（允许以 "shell" 开头，
         会剥掉），例如 ("shell", "input", "tap", "100", "100")。
+
+        replay=False 用于点击/返回这类非幂等命令：超时说明命令可能已经
+        送达设备，再发一次就会变成双击（提交按钮尤其不能重放），所以
+        只抛错不重试，交给调用方按页面状态判断。
         """
         cmd = [str(a) for a in args]
         if cmd and cmd[0] == "shell":
@@ -144,6 +141,8 @@ class AdbShellSession:
             except (AdbSessionError, TimeoutError, OSError, ValueError) as exc:
                 last_exc = exc
                 self.close()
+                if not replay:
+                    break
         raise AdbSessionError(f"adb shell 连续失败：{last_exc}")
 
     @staticmethod

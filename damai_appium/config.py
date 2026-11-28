@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 """安卓原生预约快路配置。"""
 import json
+import os
 
 
 class Config:
@@ -21,9 +22,14 @@ class Config:
         submit_point="",
         buy_point="",
         flip_template_dir="",
+        dry_run=False,
+        run_now=False,
     ):
         self.server_url = server_url
-        self.if_commit_order = if_commit_order
+        # 立即演练跳过倒计时，但仍然是演练，必须强制不提交
+        self.run_now = bool(run_now)
+        self.dry_run = bool(dry_run) or self.run_now
+        self.if_commit_order = bool(if_commit_order) and not self.dry_run
         self.device_name = device_name
         self.platform_version = platform_version
         self.ticket_count = ticket_count
@@ -60,4 +66,12 @@ class Config:
             config.get("submit_point", ""),
             config.get("buy_point", ""),
             config.get("flip_template_dir", ""),
+            dry_run=(
+                os.environ.get("DAMAI_DRY_RUN") == "1"
+                or bool(config.get("dry_run"))
+            ),
+            run_now=(
+                os.environ.get("DAMAI_RUN_NOW") == "1"
+                or bool(config.get("run_now"))
+            ),
         )

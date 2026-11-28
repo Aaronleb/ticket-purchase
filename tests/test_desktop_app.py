@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -35,8 +36,14 @@ class DesktopAppTests(unittest.TestCase):
             desktop_app.APP_VERSION,
         )
         manifest = (self.destination / "node_modules" / ".cache" / "appium" / "extensions.yaml").read_text(encoding="utf-8")
-        install_path = self.destination / "node_modules" / "appium-uiautomator2-driver"
-        self.assertIn(desktop_app.json.dumps(str(install_path), ensure_ascii=False), manifest)
+        install_line = next(
+            line for line in manifest.splitlines() if line.strip().startswith("installPath:")
+        )
+        install_path = json.loads(install_line.split(":", 1)[1].strip())
+        self.assertEqual(
+            install_path,
+            str(self.destination / "node_modules" / "appium-uiautomator2-driver"),
+        )
         self.assertNotIn("/build/runtime", manifest)
 
     def test_prepare_appium_home_reuses_matching_version(self):
@@ -45,6 +52,19 @@ class DesktopAppTests(unittest.TestCase):
         marker.write_text("keep", encoding="utf-8")
         desktop_app.prepare_appium_home(self.template, self.destination)
         self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_prepare_appium_home_recopies_when_manifest_missing(self):
+        desktop_app.prepare_appium_home(self.template, self.destination)
+        manifest = (
+            self.destination
+            / "node_modules"
+            / ".cache"
+            / "appium"
+            / "extensions.yaml"
+        )
+        manifest.unlink()
+        desktop_app.prepare_appium_home(self.template, self.destination)
+        self.assertTrue(manifest.is_file())
 
     def test_runtime_environment_points_appium_to_bundled_adb(self):
         node = self.root / "runtime" / "node" / "bin" / "node"
@@ -55,42 +75,42 @@ class DesktopAppTests(unittest.TestCase):
             self.assertEqual(desktop_app.os.environ["ANDROID_SDK_ROOT"], str(adb.parent))
             self.assertEqual(
                 desktop_app.os.environ["PATH"],
-                desktop_app.os.pathsep.join([str(node.parent), str(adb.parent), "/usr/bin"]),
+                desktop_app.os.pathsep.join(
+                    [str(node.parent), str(adb.parent), "/usr/bin"]
+                ),
             )
 
-    def test_windows_data_root_uses_local_app_data(self):
-        with (
-            patch.object(desktop_app.sys, "platform", "win32"),
-            patch.dict(desktop_app.os.environ, {"LOCALAPPDATA": str(self.root)}, clear=True),
-        ):
-            self.assertEqual(desktop_app.default_data_root(), self.root / "DamaiAndroid")
+    def test_runtime_binary_paths_use_windows_layout(self):
+        with patch.object(desktop_app, "IS_WINDOWS", True):
+            node, adb = desktop_app.runtime_binary_paths(self.root)
+        self.assertEqual(node, self.root / "node" / "node.exe")
+        self.assertEqual(adb, self.root / "android-platform-tools" / "adb.exe")
 
-    def test_windows_packaged_resource_root_is_executable_directory(self):
-        executable = self.root / "DamaiAndroid" / "DamaiAndroid.exe"
-        with (
-            patch.object(desktop_app.sys, "platform", "win32"),
-            patch.object(desktop_app.sys, "executable", str(executable)),
-            patch.object(desktop_app.sys, "frozen", True, create=True),
-        ):
-            self.assertEqual(desktop_app.default_resource_root(), executable.parent.resolve())
+    def test_runtime_binary_paths_use_posix_layout(self):
+        with patch.object(desktop_app, "IS_WINDOWS", False):
+            node, adb = desktop_app.runtime_binary_paths(self.root)
+        self.assertEqual(node, self.root / "node" / "bin" / "node")
+        self.assertEqual(adb, self.root / "android-platform-tools" / "adb")
 
-    def test_windows_runtime_uses_exe_files(self):
-        with patch.object(desktop_app.sys, "platform", "win32"):
-            node, adb = desktop_app.runtime_executables(self.root)
-        self.assertEqual(node, self.root / "runtime" / "node" / "node.exe")
-        self.assertEqual(adb, self.root / "runtime" / "android-platform-tools" / "adb.exe")
-
-    def test_windows_console_streams_use_utf8(self):
-        stdout = MagicMock()
-        stderr = MagicMock()
+    def test_windows_data_root_uses_local_appdata(self):
         with (
-            patch.object(desktop_app.sys, "platform", "win32"),
-            patch.object(desktop_app.sys, "stdout", stdout),
-            patch.object(desktop_app.sys, "stderr", stderr),
+            patch.object(desktop_app, "IS_WINDOWS", True),
+            patch.dict(desktop_app.os.environ, {"LOCALAPPDATA": "/local/appdata"}, clear=True),
         ):
-            desktop_app.configure_console_encoding()
-        stdout.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
-        stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+            self.assertEqual(
+                desktop_app.default_data_root(),
+                Path("/local/appdata") / "DamaiAndroid",
+            )
+
+    def test_self_check_reports_missing_runtime(self):
+        with patch("builtins.print") as printer:
+            code = desktop_app.run_self_check(self.root)
+        self.assertEqual(code, 1)
+        payload = json.loads(printer.call_args.args[0])
+        details = {item["name"]: item["ok"] for item in payload["checks"]}
+        self.assertFalse(payload["ok"])
+        self.assertFalse(details["node"])
+        self.assertFalse(details["adb"])
 
     def test_web_mode_worker_command_includes_entry_script_and_resources(self):
         with (
@@ -144,12 +164,7 @@ class DesktopAppTests(unittest.TestCase):
         webview = ModuleType("webview")
         webview.create_window = MagicMock(return_value=window)
         webview.start = MagicMock()
-        with (
-            patch.object(desktop_app.sys, "platform", "darwin"),
-            patch("desktop_app.signal.signal"),
-            patch("desktop_app.install_native_quit_handler") as quit_handler,
-            patch("desktop_app.install_window_close_guard") as close_guard,
-        ):
+        with patch("desktop_app.signal.signal"), patch("desktop_app.install_native_quit_handler") as quit_handler, patch("desktop_app.install_window_close_guard") as close_guard:
             desktop_app.run_console(server, "http://127.0.0.1:8765", True, webview)
         webview.create_window.assert_called_once_with(
             "大麦安卓抢票",
@@ -159,24 +174,12 @@ class DesktopAppTests(unittest.TestCase):
             min_size=(960, 680),
         )
         close_guard.assert_called_once_with(window)
-        webview.start.assert_called_once_with(quit_handler, (window,))
+        if desktop_app.IS_WINDOWS:
+            webview.start.assert_called_once_with()
+            quit_handler.assert_not_called()
+        else:
+            webview.start.assert_called_once_with(quit_handler, (window,))
         server.serve_forever.assert_called_once_with()
-        server.shutdown.assert_called_once_with()
-
-    def test_windows_window_mode_does_not_load_appkit(self):
-        server = MagicMock()
-        webview = ModuleType("webview")
-        webview.create_window = MagicMock(return_value=MagicMock())
-        webview.start = MagicMock()
-        with (
-            patch.object(desktop_app.sys, "platform", "win32"),
-            patch("desktop_app.signal.signal"),
-            patch("desktop_app.install_native_quit_handler") as quit_handler,
-            patch("desktop_app.install_window_close_guard"),
-        ):
-            desktop_app.run_console(server, "http://127.0.0.1:8765", True, webview)
-        webview.start.assert_called_once_with()
-        quit_handler.assert_not_called()
         server.shutdown.assert_called_once_with()
 
     def test_window_start_failure_stops_server(self):

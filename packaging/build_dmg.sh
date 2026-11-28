@@ -44,7 +44,7 @@ export npm_config_cache="$BUILD/npm-cache"
 "$ROOT/.venv/bin/python" -m unittest discover -s tests -v
 (
   cd "$PROJECT_ROOT"
-  "$ROOT/.venv/bin/python" -m pytest tests/test_damai_app_v2.py -q --no-cov
+  "$ROOT/.venv/bin/python" -m pytest tests/test_flip_watch.py -q --no-cov
 )
 
 download() {
@@ -95,6 +95,22 @@ cp "$PROJECT_ROOT/damai_appium/__init__.py" "$RUNTIME/ticket-purchase/damai_appi
 cp "$PROJECT_ROOT/damai_appium/config.py" "$RUNTIME/ticket-purchase/damai_appium/"
 cp "$PROJECT_ROOT/damai_appium/damai_app_v2.py" "$RUNTIME/ticket-purchase/damai_appium/"
 cp "$PROJECT_ROOT/damai_appium/sale_clock.py" "$RUNTIME/ticket-purchase/damai_appium/"
+# 打包不带出开发机的配置、登录态和校准模板
+rm -f "$RUNTIME/ticket-purchase/damai_appium/config.json" \
+      "$RUNTIME/ticket-purchase/damai_appium/config.jsonc" \
+      "$RUNTIME/ticket-purchase/damai_appium/damai_cookies.pkl"
+rm -rf "$RUNTIME/ticket-purchase/damai_appium/flip-templates" \
+       "$RUNTIME/ticket-purchase/damai_appium/logs"
+for leftover in \
+  "$RUNTIME/ticket-purchase/damai_appium/config.json" \
+  "$RUNTIME/ticket-purchase/damai_appium/config.jsonc" \
+  "$RUNTIME/ticket-purchase/damai_appium/damai_cookies.pkl" \
+  "$RUNTIME/ticket-purchase/damai_appium/flip-templates"; do
+  if [ -e "$leftover" ]; then
+    echo "包内残留本机设置：$leftover" >&2
+    exit 1
+  fi
+done
 cp "$RUNTIME/node/LICENSE" "$RUNTIME/NODE-LICENSE.txt"
 cp "$ROOT/packaging/THIRD_PARTY_NOTICES.md" "$RUNTIME/THIRD_PARTY_NOTICES.md"
 

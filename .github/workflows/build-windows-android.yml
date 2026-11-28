@@ -1,0 +1,133 @@
+name: Build Windows Android App
+
+# 在 GitHub Actions 的 Windows 机器上构建免安装安卓抢票包：
+#   dist/DamaiAndroid-windows-x64.zip
+# 解压后运行 DamaiAndroid.exe。包内自带 Python、Node.js、ADB、Appium
+# 和 UiAutomator2 驱动，目标机无需安装这些依赖。
+
+on:
+  push:
+    branches: [main, master, feature_yuyue]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/build-windows-android.yml"
+      - "packaging/**"
+      - "desktop_app.py"
+      - "app.py"
+      - "appium_service.py"
+      - "process_manager.py"
+      - "ocr_tool.py"
+      - "config_store.py"
+      - "android_config.py"
+      - "android_calibrate.py"
+      - "android_diagnostics.py"
+      - "android_environment.py"
+      - "android_prewarm.py"
+      - "time_sync.py"
+      - "adb_session.py"
+      - "activity_watch.py"
+      - "flip_watch.py"
+      - "scrcpy_stream.py"
+      - "damai_appium/**"
+      - "static/**"
+      - "resources/**"
+      - "tools/damai_ocr"
+      - "requirements.txt"
+      - "requirements-build.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 缓存 Node.js / platform-tools 下载与 npm 包，重复构建快很多
+      - name: Cache Windows build inputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/downloads-windows
+            build/npm-cache
+          key: win-app-deps-${{ hashFiles('packaging/dependencies.env', 'requirements.txt', 'requirements-build.txt') }}
+          restore-keys: |
+            win-app-deps-
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt -r requirements-build.txt *>&1 | Tee-Object -FilePath build/install.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          python -m unittest discover -s tests -v *>&1 | Tee-Object -FilePath build/unittest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest tests/test_flip_watch.py -q --no-cov *>&1 | Tee-Object -FilePath build/pytest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File packaging/build_windows_android.ps1 -SkipInstall -SkipTests *>&1 | Tee-Object -FilePath build/build-run.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify package from zip
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File packaging/verify_windows_package.ps1 -ZipPath dist/DamaiAndroid-windows-x64.zip *>&1 | Tee-Object -FilePath build/verify-run.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-android-build-log
+          path: |
+            build/install.log
+            build/unittest.log
+            build/pytest.log
+            build/build.log
+            build/build-run.log
+            build/build-error.txt
+            build/verify.log
+            build/verify-run.log
+            build/verify-error.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Package summary
+        shell: pwsh
+        run: |
+          $archive = Get-Item -LiteralPath "dist/DamaiAndroid-windows-x64.zip"
+          $sizeMb = [math]::Round($archive.Length / 1MB, 1)
+          "### Windows 安卓包已构建" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- 压缩包：``dist/DamaiAndroid-windows-x64.zip``（$sizeMb MB）" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- 用法：解压后运行 ``DamaiAndroid.exe``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- 验证：打包自检 + 控制台启动 + 内置 Appium 就绪" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: DamaiAndroid-windows-x64
+          path: dist/DamaiAndroid-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+# 触发说明：修改本文件或 packaging/ 下文件会重新构建 Windows 安卓包。

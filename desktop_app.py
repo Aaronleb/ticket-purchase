@@ -8,46 +8,58 @@ import shutil
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 from app import create_server
 from appium_service import AppiumService
 
 
-APP_VERSION = "1.0.0"
-
-
-def configure_console_encoding() -> None:
-    if sys.platform != "win32":
-        return
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(encoding="utf-8", errors="replace")
+APP_VERSION = "1.1.0"
+IS_WINDOWS = os.name == "nt"
 
 
 def default_resource_root() -> Path:
     if getattr(sys, "frozen", False):
-        executable_dir = Path(sys.executable).resolve().parent
-        if sys.platform == "darwin":
-            return executable_dir.parent / "Resources"
-        return executable_dir
+        executable = Path(sys.executable).resolve()
+        if IS_WINDOWS:
+            # Windows 免安装版：节点、ADB、Appium 与 exe 同级的 runtime/ 目录
+            return executable.parent
+        return executable.parent.parent / "Resources"
     return Path(__file__).resolve().parent / "packaging" / "runtime"
 
 
 def default_data_root() -> Path:
-    if sys.platform == "win32":
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
-        return base / "DamaiAndroid"
+    if IS_WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or str(
+            Path.home() / "AppData" / "Local"
+        )
+        return Path(base) / "DamaiAndroid"
     return Path.home() / "Library" / "Application Support" / "DamaiAndroid"
 
 
-def runtime_executables(resources: Path) -> tuple[Path, Path]:
-    runtime = resources / "runtime"
-    if sys.platform == "win32":
-        return runtime / "node" / "node.exe", runtime / "android-platform-tools" / "adb.exe"
-    return runtime / "node" / "bin" / "node", runtime / "android-platform-tools" / "adb"
+def runtime_binary_paths(runtime: Path) -> tuple[Path, Path]:
+    """返回 (node 可执行文件, adb 可执行文件) 的打包内路径。"""
+    if IS_WINDOWS:
+        return (
+            runtime / "node" / "node.exe",
+            runtime / "android-platform-tools" / "adb.exe",
+        )
+    return (
+        runtime / "node" / "bin" / "node",
+        runtime / "android-platform-tools" / "adb",
+    )
+
+
+def ensure_standard_streams() -> None:
+    """窗口模式下 stdout/stderr 可能为 None，避免 print 直接崩溃。"""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(
+                sys,
+                name,
+                open(os.devnull, "w", encoding="utf-8", errors="replace"),
+            )
 
 
 def rewrite_appium_manifest(destination: Path) -> None:
@@ -73,8 +85,12 @@ def rewrite_appium_manifest(destination: Path) -> None:
 def prepare_appium_home(template: Path, destination: Path) -> None:
     marker = destination / ".damai-app-version"
     if marker.is_file() and marker.read_text(encoding="utf-8").strip() == APP_VERSION:
-        rewrite_appium_manifest(destination)
-        return
+        try:
+            rewrite_appium_manifest(destination)
+            return
+        except (FileNotFoundError, ValueError):
+            # 数据目录被清理/杀软拦截导致文件缺失时，重新完整复制一次
+            logging.warning("Appium 目录不完整，正在重新复制")
     if not template.is_dir():
         raise FileNotFoundError(f"未找到内置 Appium 驱动：{template}")
 
@@ -135,11 +151,84 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="大麦安卓抢票桌面应用")
     parser.add_argument("--android-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-browser", "--no-window", dest="no_window", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--self-check", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--resources", type=Path, default=None)
     parser.add_argument("--data-dir", type=Path, default=None)
-    parser.add_argument("--startup-timeout", type=float, default=30)
+    parser.add_argument("--startup-timeout", type=float, default=90)
     return parser
+
+
+def run_self_check(resources: Path) -> int:
+    """不启动窗口/Appium，检查打包资源是否齐全（供 CI 与排障使用）。"""
+    runtime = resources / "runtime"
+    node_path, adb_path = runtime_binary_paths(runtime)
+    checks = [
+        ("resources", resources.is_dir(), str(resources)),
+        ("node", node_path.is_file(), str(node_path)),
+        ("adb", adb_path.is_file(), str(adb_path)),
+        (
+            "appium",
+            (runtime / "appium-cli" / "node_modules" / "appium" / "index.js").is_file(),
+            str(runtime / "appium-cli" / "node_modules" / "appium" / "index.js"),
+        ),
+        (
+            "uiautomator2",
+            (runtime / "appium-cli" / "node_modules" / "appium-uiautomator2-driver").is_dir(),
+            str(runtime / "appium-cli" / "node_modules" / "appium-uiautomator2-driver"),
+        ),
+        (
+            "worker",
+            (runtime / "ticket-purchase" / "damai_appium" / "damai_app_v2.py").is_file(),
+            str(runtime / "ticket-purchase" / "damai_appium" / "damai_app_v2.py"),
+        ),
+        (
+            "static",
+            (Path(__file__).resolve().parent / "static" / "index.html").is_file(),
+            str(Path(__file__).resolve().parent / "static" / "index.html"),
+        ),
+    ]
+    try:
+        import webview
+
+        checks.append(("webview", True, getattr(webview, "__version__", "unknown")))
+        if IS_WINDOWS:
+            try:
+                # 触发 pywebview 的 EdgeChromium 后端导入，验证 pythonnet/WebView2 已被打包
+                import webview.platforms.edgechromium  # noqa: F401
+
+                checks.append(("webview_backend", True, "edgechromium"))
+            except Exception as exc:  # noqa: BLE001
+                checks.append(("webview_backend", False, repr(exc)))
+    except Exception as exc:  # noqa: BLE001 - 自检要报告具体缺失项
+        checks.append(("webview", False, repr(exc)))
+
+    try:
+        import contextlib
+        import io
+
+        import ocr_tool
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            ocr_tool._get_engine()
+        checks.append(("ocr", True, "rapidocr ready"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(("ocr", False, repr(exc)))
+    ok = all(item[1] for item in checks)
+    print(
+        json.dumps(
+            {
+                "ok": ok,
+                "checks": [
+                    {"name": name, "ok": passed, "detail": detail}
+                    for name, passed, detail in checks
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    return 0 if ok else 1
 
 
 def request_window_close(window) -> None:
@@ -228,10 +317,11 @@ def run_console(server, url: str, show_window: bool, webview_module=None) -> Non
         install_window_close_guard(window)
         if not stopping:
             logging.info("正在显示应用窗口")
-            if sys.platform == "darwin":
-                webview_module.start(install_native_quit_handler, (window,))
-            else:
+            if IS_WINDOWS:
+                # Windows 由 pywebview 自己的窗口生命周期管理退出
                 webview_module.start()
+            else:
+                webview_module.start(install_native_quit_handler, (window,))
             logging.info("窗口事件循环已结束")
     except Exception:
         logging.exception("应用窗口运行失败")
@@ -245,9 +335,11 @@ def run_console(server, url: str, show_window: bool, webview_module=None) -> Non
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_console_encoding()
+    ensure_standard_streams()
     args = build_parser().parse_args(argv)
     resources = (args.resources or default_resource_root()).resolve()
+    if args.self_check:
+        return run_self_check(resources)
     if args.android_worker:
         if not getattr(sys, "frozen", False):
             sys.path.insert(0, str(resources / "runtime" / "ticket-purchase"))
@@ -264,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     runtime = resources / "runtime"
-    node_path, adb_path = runtime_executables(resources)
+    node_path, adb_path = runtime_binary_paths(runtime)
     configure_runtime_environment(node_path, adb_path)
 
     try:
@@ -275,14 +367,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     appium_entry = data_root / "appium-home" / "node_modules" / "appium" / "index.js"
-    service = AppiumService(
-        node_path,
-        appium_entry,
-        data_root / "appium-home",
-        logs / "appium.log",
-        startup_timeout=args.startup_timeout,
-    )
-    service.start()
+
+    def new_service() -> AppiumService:
+        return AppiumService(
+            node_path,
+            appium_entry,
+            data_root / "appium-home",
+            logs / "appium.log",
+            startup_timeout=args.startup_timeout,
+        )
+
+    service = new_service()
+    startup = service.start()
+    if startup.get("state") != "ready":
+        # 首次启动可能碰到杀软扫描、端口占用或磁盘慢，换端口重试一次
+        logging.warning("内置 Appium 首次启动未就绪：%s", startup.get("message"))
+        service.stop()
+        time.sleep(1)
+        service = new_service()
+        startup = service.start()
+    if startup.get("state") != "ready":
+        logging.error("内置 Appium 启动失败：%s", startup.get("message"))
+        print(f"内置 Appium 启动失败：{startup.get('message')}", file=sys.stderr)
     try:
         server = create_server(
             runtime / "ticket-purchase",

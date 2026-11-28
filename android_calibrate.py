@@ -1,13 +1,12 @@
 # -*- coding: UTF-8 -*-
-"""开抢前采集按钮坐标和三页正面模板。
+"""开抢前采集按钮坐标和可购买按钮正面模板。
 
 识别手机当前停在哪个页面（详情页 / 选票档页 / 确认页），截图 OCR 找到
-对应按钮文字的实测中心点，写回配置对应字段。只有正面识别到当前页目标
-按钮才保存对应模板；容器坐标兜底不会把“已预约”保存为放行模板。
+对应按钮文字的实测中心点，写回配置对应字段。详情页只有正面识别到可购买
+文案才保存无 OCR 模板；通过容器坐标兜底时不会把“已预约”保存为放行模板。
 """
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import tempfile
@@ -40,6 +39,17 @@ def _foreground_activity(device: str) -> str:
     output = _adb(device, "shell", "dumpsys", "activity", "activities", timeout=30).stdout
     match = re.search(r"topResumedActivity=.*?/([\w.$]+)", output)
     return match.group(1) if match else ""
+
+
+# 负向模板：这些文案表示当前不可购买，命中后必须拒绝放行
+NEGATIVE_KEYWORDS = ("已预约", "未开售", "即将开抢", "即将开售", "已售罄")
+NEGATIVE_TEMPLATE_SLUGS = {
+    "已预约": "yuyue",
+    "未开售": "weikaisou",
+    "即将开抢": "jiangkaqiang",
+    "即将开售": "jiangkaishou",
+    "已售罄": "yishouqing",
+}
 
 
 _OCR_ENGINE = None
@@ -77,6 +87,30 @@ def _find_button(rows, keywords) -> tuple[int, int] | None:
     return None
 
 
+def _find_button_keyword(rows, keywords) -> str:
+    """返回实际命中的候选文字，用于给模板命名。"""
+    for keyword in keywords:
+        for _x, _y, text in rows:
+            if text == keyword or (len(keyword) > 2 and keyword in text):
+                return keyword
+    return ""
+
+
+def _capture_screen(device: str) -> str:
+    """截取手机当前屏幕，返回临时文件路径。"""
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+        image_path = handle.name
+    with open(image_path, "wb") as output:
+        capture = subprocess.run(
+            ["adb", "-s", device, "exec-out", "screencap", "-p"],
+            stdout=output,
+            timeout=30,
+        )
+    if capture.returncode != 0:
+        raise ConfigError("截图失败，请确认手机亮屏且 USB 调试正常")
+    return image_path
+
+
 def _dump_buy_bar_center(device: str) -> tuple[int, int] | None:
     """详情页底栏是无障碍容器，OCR 失败时可从页面结构里取中心。"""
     _adb(device, "shell", "uiautomator", "dump", "/sdcard/damai_calibrate.xml", timeout=30)
@@ -92,14 +126,7 @@ def _dump_buy_bar_center(device: str) -> tuple[int, int] | None:
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
-TEMPLATE_FIELDS = {
-    "buy_point": "buy",
-    "confirm_point": "confirm",
-    "submit_point": "submit",
-}
-
-
-def _save_button_template(image_path: str, point, template_dir, name: str) -> str:
+def _save_button_template(image_path: str, point, template_dir, filename: str) -> str:
     from PIL import Image
 
     directory = Path(template_dir)
@@ -115,18 +142,70 @@ def _save_button_template(image_path: str, point, template_dir, name: str) -> st
             min(image.height, point[1] + half_height),
         )
     )
-    destination = directory / f"{name}.png"
+    destination = directory / filename
     crop.save(destination, format="PNG")
-    metadata_path = directory / "screens.json"
-    try:
-        screens = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        screens = {}
-    screens[name] = [image.width, image.height]
-    metadata_path.write_text(
-        json.dumps(screens, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
     return str(destination)
+
+
+def _save_buy_template(image_path: str, point, template_dir) -> str:
+    return _save_button_template(image_path, point, template_dir, "buy.png")
+
+
+def _save_sku_confirm_template(
+    image_path: str, point, template_dir, filename: str = "sku-confirm.png"
+) -> str:
+    """票档页「确定」/确认页「立即提交」按钮模板：只裁固定按钮框。
+
+    票档页价格块宽度会随金额变化，必须排除；确认页同理只用按钮本体。
+    以 OCR 识别到的按钮文字中心为锚点裁固定大小。
+    """
+    from PIL import Image
+
+    from flip_watch import SKU_TEMPLATE_HALF_HEIGHT, SKU_TEMPLATE_HALF_WIDTH
+
+    directory = Path(template_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    image = Image.open(image_path).convert("L")
+    half_width = max(60, int(image.width * SKU_TEMPLATE_HALF_WIDTH))
+    half_height = max(20, int(image.height * SKU_TEMPLATE_HALF_HEIGHT))
+    crop = image.crop(
+        (
+            max(0, point[0] - half_width),
+            max(0, point[1] - half_height),
+            min(image.width, point[0] + half_width),
+            min(image.height, point[1] + half_height),
+        )
+    )
+    destination = directory / filename
+    crop.save(destination, format="PNG")
+    return str(destination)
+
+
+def _save_submit_template(image_path: str, point, template_dir) -> str:
+    return _save_sku_confirm_template(
+        image_path, point, template_dir, filename="sku-submit.png"
+    )
+
+
+def _template_warning(template_path: str) -> str:
+    """模板是灰暗的未开售按钮时提示风险（灰度模板只能确认文字形状）。"""
+    try:
+        from PIL import Image
+
+        with Image.open(template_path) as image:
+            values = image.convert("L").tobytes()
+    except Exception:
+        return ""
+    if not values:
+        return ""
+    bright = sum(1 for value in values if value >= 170) / len(values)
+    if bright < 0.08:
+        return (
+            "模板看起来是未开售的灰色按钮：模板只认字形，"
+            "程序还会检查底栏是否已变成可购买的着色状态才放行；"
+            "如条件允许，请在按钮真正可购买时重新采集一次模板。"
+        )
+    return ""
 
 
 def calibrate_android_point(device: str, template_dir=None) -> dict:
@@ -142,16 +221,7 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
         )
     _marker, field, page_name, button_name, keywords = page
 
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-        image_path = handle.name
-    with open(image_path, "wb") as output:
-        capture = subprocess.run(
-            ["adb", "-s", device, "exec-out", "screencap", "-p"],
-            stdout=output,
-            timeout=30,
-        )
-    if capture.returncode != 0:
-        raise ConfigError("截图失败，请确认手机亮屏且 USB 调试正常")
+    image_path = _capture_screen(device)
 
     rows = _ocr_rows(image_path)
     point = _find_button(rows, keywords)
@@ -170,8 +240,62 @@ def calibrate_android_point(device: str, template_dir=None) -> dict:
         "point": f"{point[0]},{point[1]}",
         "activity": activity,
     }
-    if text_confirmed and template_dir:
-        result["template_path"] = _save_button_template(
-            image_path, point, template_dir, TEMPLATE_FIELDS[field]
+    if field == "buy_point" and text_confirmed and template_dir:
+        result["template_path"] = _save_buy_template(image_path, point, template_dir)
+        warning = _template_warning(result["template_path"])
+        if warning:
+            result["warning"] = warning
+    elif field == "confirm_point" and text_confirmed and template_dir:
+        # 顺带生成票档页「确定」按钮模板（固定区域，不含金额）
+        result["template_path"] = _save_sku_confirm_template(
+            image_path, point, template_dir
+        )
+    elif field == "submit_point" and text_confirmed and template_dir:
+        # 确认页「立即提交」模板：首帧后命中即可点，替代固定 0.4 秒等待
+        result["template_path"] = _save_submit_template(
+            image_path, point, template_dir
         )
     return result
+
+
+def calibrate_negative_point(device: str, template_dir=None) -> dict:
+    """在“已预约/未开售”的详情页采集负向模板。
+
+    负向模板只用于拒绝放行：开售后底栏命中这些模板时继续等待，
+    避免把仍不可购买的底栏当成可购买按钮点击。
+    """
+    if not device:
+        raise ConfigError("请先在配置里选择并保存设备名")
+    if not template_dir:
+        raise ConfigError("模板目录未配置，请先采集一次「立即购票」坐标")
+    activity = _foreground_activity(device)
+    if "ProjectDetailActivity" not in activity:
+        raise ConfigError(
+            f"当前页面（{activity or '未知'}）不是演出详情页，"
+            "请在大麦打开显示「已预约」或「未开售」的详情页后重试"
+        )
+
+    image_path = _capture_screen(device)
+    rows = _ocr_rows(image_path)
+    point = _find_button(rows, NEGATIVE_KEYWORDS)
+    if point is None:
+        raise ConfigError(
+            "没有识别到「已预约 / 未开售 / 即将开抢」等不可购买文案，"
+            "请确认详情页显示已预约状态后重试"
+        )
+    keyword = _find_button_keyword(rows, NEGATIVE_KEYWORDS)
+    slug = NEGATIVE_TEMPLATE_SLUGS.get(keyword, "template")
+    template_path = _save_button_template(
+        image_path,
+        point,
+        template_dir,
+        f"negative-{slug}.png",
+    )
+    return {
+        "field": "negative_template",
+        "page": "详情页",
+        "button": keyword,
+        "point": f"{point[0]},{point[1]}",
+        "activity": activity,
+        "template_path": template_path,
+    }

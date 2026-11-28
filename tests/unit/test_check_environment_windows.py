@@ -82,6 +82,22 @@ def test_find_chrome_reads_windows_install_version_directory(monkeypatch, tmp_pa
     )
 
 
+def test_find_chrome_uses_bundled_version_env(monkeypatch, tmp_path):
+    """Bundled Chrome for Testing has no version directory, so use the launcher env."""
+    chrome_path = tmp_path / "browser" / "chrome-win64" / "chrome.exe"
+    chrome_path.parent.mkdir(parents=True)
+    chrome_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(check_environment, "_get_chrome_paths", lambda: [str(chrome_path)])
+    monkeypatch.setenv("DAMAI_CHROME_VERSION", "158.0.8127.36")
+    monkeypatch.setattr(check_environment, "_run_command_get_version", lambda command: None)
+
+    assert check_environment._find_chrome() == (
+        str(chrome_path),
+        "Google Chrome 158.0.8127.36",
+        "158",
+    )
+
+
 def test_get_chromedriver_paths_includes_autoinstaller_cache(monkeypatch, tmp_path):
     """Environment checks should find drivers downloaded by chromedriver-autoinstaller."""
     package_dir = tmp_path / "chromedriver_autoinstaller"

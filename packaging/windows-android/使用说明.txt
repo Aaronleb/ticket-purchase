@@ -1,0 +1,40 @@
+大麦安卓抢票（Windows 10/11 64 位）
+
+1. 把 DamaiAndroid-windows-x64.zip 解压到任意目录（建议路径不含空格）。
+2. 双击 DamaiAndroid.exe 启动，控制台会在独立窗口中打开。
+3. 当前测试版没有代码签名证书，Windows SmartScreen 可能提示“已保护你的电脑”：
+   点击“更多信息”，再点“仍要运行”。
+4. 窗口使用系统自带的 WebView2 渲染。Windows 11 已内置；Windows 10 如提示缺少
+   WebView2，请先安装 Microsoft Edge WebView2 Runtime（微软官网免费下载）。
+5. 手机开启“开发者选项 → USB 调试”，用数据线连接电脑，并在手机上允许调试授权。
+6. 在大麦 App 中提前登录、添加观演人，并完成目标演出的原生预约，停在演出详情页。
+7. 回到控制台检测设备，填写城市、票档序号、购票数量和观演人。首次测试请关闭
+   “自动提交订单”，确认流程走通后再开启。
+8. 环境检查全部通过后开始抢票；程序会自动等待到设定的开售时间。
+9. 关闭窗口会停止抢票任务、控制台和内置 Appium。
+
+配置与日志保存在 %LOCALAPPDATA%\DamaiAndroid，升级应用不会主动覆盖配置。
+包内已自带 Python、Node.js、ADB、Appium 和 UiAutomator2 驱动，
+无需在电脑上安装 Python、Node.js、Android SDK 或 Appium。
+
+说明：
+- 本包仅包含安卓抢票入口，不包含 PC 网页抢票。
+- 构建流水线会验证程序启动、内置 Appium 就绪和控制台接口可用；
+  未连接真机，因此不宣称真机抢票链路已经验证。
+- 订单结果以大麦 App 的订单记录为准。
+
+五、如果提示“无法连接 http://127.0.0.1:端口/status”
+------------------------------------------------------
+这是电脑端的内置 Appium 没有启动成功，与手机无关，不需要在手机上安装 Appium。
+程序会在控制台的“内置 Appium”一栏显示退出原因和日志末尾，也可以打开：
+  %LOCALAPPDATA%\DamaiAndroid\logs\appium.log
+常见原因与处理：
+1. 安全软件拦截了包内的 node.exe：把解压目录加入信任列表后重新启动。
+2. 首次启动较慢：程序已自动等待 90 秒并重试一次，请稍候再看。
+3. 端口被占用或系统限制：关闭其他占用了大量本机端口的程序后重启应用。
+4. 目录被杀软清理导致文件缺失：删除 %LOCALAPPDATA%\DamaiAndroid\appium-home 后重启，
+   程序会自动重新复制内置 Appium。
+
+启动抢票后，UiAutomator2 会自动向手机安装 Appium Settings 和
+io.appium.uiautomator2.server 两个辅助应用；手机只需开启 USB 调试并允许安装，
+不需要手动安装 Appium。

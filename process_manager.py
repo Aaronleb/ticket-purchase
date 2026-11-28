@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import os
 import queue
+import signal
 import subprocess
 import threading
 import time
 from collections import deque
 from pathlib import Path
-
-from process_utils import background_popen_kwargs, terminate_process_tree
 
 
 class TaskError(RuntimeError):
@@ -119,7 +118,7 @@ class ProcessManager:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
-                    **background_popen_kwargs(),
+                    start_new_session=True,
                 )
             except (OSError, ValueError) as exc:
                 self._task = task
@@ -179,6 +178,24 @@ class ProcessManager:
             self._append_log(f"── 进程退出，代码 {code} ──")
             self._publish_status()
 
+    def _terminate_process_group(self, proc, force: bool = False) -> None:
+        """终止子进程及其子进程；Windows 没有进程组信号，改用 taskkill /T。"""
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return
+        try:
+            os.killpg(
+                os.getpgid(proc.pid),
+                signal.SIGKILL if force else signal.SIGTERM,
+            )
+        except ProcessLookupError:
+            pass
+
     def stop(self) -> dict:
         with self._lock:
             proc = self._proc
@@ -189,7 +206,12 @@ class ProcessManager:
             self._message = "正在停止任务"
         self._append_log("── 正在停止进程组 ──")
         self._publish_status()
-        terminate_process_tree(proc)
+        self._terminate_process_group(proc)
+        try:
+            proc.wait(timeout=4)
+        except subprocess.TimeoutExpired:
+            self._terminate_process_group(proc, force=True)
+            proc.wait(timeout=2)
         return self.snapshot()
 
     def complete_login(self, signal_path: Path | str) -> dict:

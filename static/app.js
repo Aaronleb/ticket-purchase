@@ -77,13 +77,30 @@ function readAndroidConfig() {
     device_name: $("#android-device-name").value.trim(),
     platform_version: $("#android-platform-version").value.trim(),
     ticket_count: Number($("#android-ticket-count").value),
+    price: $("#android-price").value.trim(),
     sell_start_time: $("#android-sell-start-time").value,
     if_commit_order: $("#android-if-commit").checked,
     fast_mode: $("#android-fast-mode").checked,
     confirm_point: $("#android-confirm-point").value.trim(),
     submit_point: $("#android-submit-point").value.trim(),
     buy_point: $("#android-buy-point").value.trim(),
+    flip_template_dir: $("#android-flip-template-dir").value.trim(),
   };
+}
+
+function updateAndroidTotal() {
+  const totalInput = $("#android-total");
+  if (!totalInput) return;
+  const raw = ($("#android-price").value || "").replaceAll(",", "").trim();
+  const count = Number($("#android-ticket-count").value);
+  const match = raw.match(/\d+(?:\.\d+)?/);
+  const unit = match ? Number(match[0]) : NaN;
+  if (!Number.isFinite(unit) || unit <= 0 || !Number.isInteger(count) || count <= 0) {
+    totalInput.value = "未填单价";
+    return;
+  }
+  const total = unit * count;
+  totalInput.value = `¥${Number.isInteger(total) ? total : total.toFixed(2)}`;
 }
 
 function fillAndroidConfig(config) {
@@ -92,15 +109,18 @@ function fillAndroidConfig(config) {
   $("#android-device-name").value = config.device_name || "";
   $("#android-platform-version").value = config.platform_version || "";
   $("#android-ticket-count").value = config.ticket_count ?? 1;
+  $("#android-price").value = config.price || "";
   $("#android-sell-start-time").value = config.sell_start_time ? config.sell_start_time.slice(0, 19) : "";
   $("#android-if-commit").checked = Boolean(config.if_commit_order);
   $("#android-fast-mode").checked = config.fast_mode !== false;
   $("#android-confirm-point").value = config.confirm_point || "";
   $("#android-submit-point").value = config.submit_point || "";
   $("#android-buy-point").value = config.buy_point || "";
+  $("#android-flip-template-dir").value = config.flip_template_dir || "";
+  updateAndroidTotal();
 }
 
-function validateConfig(config, platform) {
+function validateConfig(config, platform, options = {}) {
   if (platform === "pc") {
     if (!config.users.length) throw new Error("请至少填写一位观演人");
     if (!config.target_url) throw new Error("请先填写演出详情页链接");
@@ -112,6 +132,11 @@ function validateConfig(config, platform) {
   if (!$("#android-ticket-count").value || !Number.isInteger(config.ticket_count) || config.ticket_count < 1 || config.ticket_count > 6) {
     throw new Error("购票数量必须是 1 到 6 之间的整数");
   }
+  const priceText = String(config.price || "").replaceAll(",", "").trim();
+  if (priceText && !/\d+(?:\.\d+)?/.test(priceText)) {
+    throw new Error("票档单价里需要包含数字，例如 1299");
+  }
+  if (options.skipSaleTime) return;
   if (!config.sell_start_time) throw new Error("请填写抢购时间");
   const saleTimestamp = new Date(config.sell_start_time).getTime();
   if (Number.isNaN(saleTimestamp)) throw new Error("抢购时间格式无效");
@@ -143,11 +168,12 @@ function setPlatform(platform, force = false) {
 function updateStatus(status) {
   currentStatus = { ...currentStatus, ...status };
   managedAppium = Boolean(currentStatus.managed_appium);
-  const androidOnly = (currentStatus.enabled_platforms || []).join(",") === "android";
-  $("#platform-switch").hidden = androidOnly;
+  const platforms = currentStatus.enabled_platforms || ["pc", "android"];
+  $("#platform-switch").hidden = platforms.length < 2;
   $("#android-server-field").hidden = managedAppium;
   $("#android-server-url").required = !managedAppium;
-  if (androidOnly && currentPlatform !== "android") setPlatform("android", true);
+  if (!platforms.includes("android") && currentPlatform !== "pc") setPlatform("pc", true);
+  if (!platforms.includes("pc") && currentPlatform !== "android") setPlatform("android", true);
   if (currentStatus.running && currentStatus.task) {
     const taskPlatform = currentStatus.task === "android" ? "android" : "pc";
     if (taskPlatform !== currentPlatform) setPlatform(taskPlatform, true);
@@ -162,7 +188,7 @@ function updateStatus(status) {
   $("#stop-button").disabled = phase === "stopping";
   $("#login-button").hidden = phase === "waiting_login";
   $("#login-complete-button").hidden = phase !== "waiting_login";
-  for (const selector of ["#login-button", "#check-button"]) $(selector).disabled = active;
+  for (const selector of ["#login-button", "#check-button", "#android-network-test", "#android-performance-test", "#android-prewarm"]) $(selector).disabled = active;
   document.querySelectorAll("[data-platform]").forEach((button) => { button.disabled = active; });
   $("#start-button").disabled = active;
 
@@ -199,6 +225,8 @@ function appendLog(entry) {
   text.textContent = entry.text || " ";
   line.append(time, text);
   logsElement.append(line);
+  const timing = timingFromLog(entry);
+  if (timing) renderTiming(timing);
   while (logsElement.children.length > 1200) logsElement.firstElementChild.remove();
   logsElement.scrollTop = logsElement.scrollHeight;
 }
@@ -237,6 +265,198 @@ function renderAndroidChecks(report) {
   container.hidden = currentPlatform !== "android";
 }
 
+function renderDiagnostics(container, report) {
+  container.replaceChildren();
+  const summary = document.createElement("strong");
+  summary.className = `diagnostic-summary level-${report.level || (report.ok ? "pass" : "fail")}`;
+  summary.textContent = report.summary || (report.ok ? "检查通过" : "发现问题");
+  container.append(summary);
+  const list = document.createElement("ul");
+  list.className = "diagnostic-list";
+  for (const metric of report.metrics || []) {
+    const item = document.createElement("li");
+    item.className = `diagnostic-item level-${metric.level || "info"}`;
+    const head = document.createElement("div");
+    head.className = "diagnostic-head";
+    const label = document.createElement("strong");
+    label.textContent = metric.label;
+    const value = document.createElement("span");
+    value.className = "diagnostic-value";
+    value.textContent = metric.value;
+    head.append(label, value);
+    const message = document.createElement("small");
+    message.textContent = `${metric.target ? `目标 ${metric.target} · ` : ""}${metric.message || ""}`;
+    item.append(head, message);
+    list.append(item);
+  }
+  container.append(list);
+  if (report.advice && report.advice.length) {
+    const advice = document.createElement("div");
+    advice.className = "diagnostic-advice";
+    const title = document.createElement("strong");
+    title.textContent = "建议";
+    advice.append(title);
+    const items = document.createElement("ul");
+    for (const text of report.advice) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      items.append(item);
+    }
+    advice.append(items);
+    container.append(advice);
+  }
+  container.hidden = false;
+}
+
+async function runAndroidDiagnostic(kind) {
+  const network = kind === "network";
+  const button = $(network ? "#android-network-test" : "#android-performance-test");
+  const hint = $(network ? "#android-network-hint" : "#android-performance-hint");
+  const results = $(network ? "#android-network-results" : "#android-performance-results");
+  const path = network ? "/api/android/network-test" : "/api/android/performance-test";
+  const label = button.textContent;
+  const defaultHint = hint.textContent;
+  button.disabled = true;
+  button.textContent = network ? "网络测试中…" : "性能测试中…";
+  hint.textContent = network ? "正在 ping detail/mtop 并读取 Wi-Fi 状态（约 5~15 秒）…" : "正在读取内存、温度、帧率与进程状态（约 5~15 秒）…";
+  try {
+    const report = await api(path, { method: "POST", body: JSON.stringify(readAndroidConfig()) });
+    renderDiagnostics(results, report);
+    hint.textContent = report.summary;
+    toast(report.summary, report.ok === false);
+  } catch (error) {
+    results.hidden = true;
+    hint.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    button.disabled = activePhases.has(currentStatus.phase);
+    button.textContent = label;
+    if (!hint.textContent) hint.textContent = defaultHint;
+  }
+}
+
+$("#android-network-test").addEventListener("click", () => runAndroidDiagnostic("network"));
+$("#android-performance-test").addEventListener("click", () => runAndroidDiagnostic("performance"));
+
+function renderPrewarmResults(data) {
+  const container = $("#android-prewarm-results");
+  container.hidden = false;
+  container.textContent = "";
+  const summary = document.createElement("p");
+  summary.textContent = data.message || (data.ok ? "票档页预热完成" : "票档页预热失败");
+  container.appendChild(summary);
+  for (const run of data.runs || []) {
+    const line = document.createElement("p");
+    line.textContent = run.ok
+      ? `第 ${run.run} 次：打开票档页 ${run.open_ms} ms`
+      : `第 ${run.run} 次：未进入票档页（${run.activity || "未知"}）`;
+    container.appendChild(line);
+  }
+}
+
+$("#android-prewarm").addEventListener("click", async () => {
+  const button = $("#android-prewarm");
+  const label = button.textContent;
+  const container = $("#android-prewarm-results");
+  button.disabled = true;
+  button.textContent = "预热中…";
+  container.hidden = false;
+  container.textContent = "正在预热：打开并返回票档页 2 次，不会点确定或下单…";
+  try {
+    const config = readAndroidConfig();
+    if (!config.device_name) throw new Error("请先填写设备名");
+    const data = await api("/api/android/prewarm", {
+      method: "POST",
+      body: JSON.stringify(config),
+    });
+    renderPrewarmResults(data);
+    toast(data.ok ? "票档页预热完成" : data.message || "票档页预热失败", !data.ok);
+  } catch (error) {
+    container.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    button.disabled = activePhases.has(currentStatus.phase);
+    button.textContent = label;
+  }
+});
+
+const TIMING_PREFIX = "[TIMING] ";
+
+function timingFromLog(entry) {
+  const text = entry && entry.text;
+  if (!text || !text.startsWith(TIMING_PREFIX)) return null;
+  try {
+    return JSON.parse(text.slice(TIMING_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
+
+function renderTiming(data) {
+  const container = $("#android-timing");
+  if (!container || !data || !Array.isArray(data.stages) || !data.stages.length) return;
+  container.replaceChildren();
+  const summary = document.createElement("div");
+  summary.className = "timing-summary";
+  const title = document.createElement("strong");
+  const scope = data.run_now
+    ? "立即演练 · 到确认页"
+    : data.dry_run
+      ? "演练 · 到确认页"
+      : data.submitted && data.submit_verified === false
+        ? "提交未确认"
+        : data.submitted === false
+          ? "到确认页"
+          : "合计";
+  title.textContent = `${data.flow_label || (data.flow === "fast" ? "极速模式" : "普通模式")} · ${scope} ${(Number(data.total_ms || 0) / 1000).toFixed(2)} 秒`;
+  const time = document.createElement("span");
+  time.textContent = data.at || "";
+  summary.append(title, time);
+  container.append(summary);
+  const hasSku = data.stages.some((stage) => String(stage.label).includes("票档"));
+  const chain = document.createElement("div");
+  chain.className = `timing-chain${hasSku ? " warn" : ""}`;
+  chain.textContent = hasSku
+    ? "链路：详情页 → 票档页 → 确认页（2 跳；票档页是额外的页面跳转）"
+    : "链路：详情页 → 确认页（1 跳，已跳过票档页）";
+  container.append(chain);
+  const rows = document.createElement("div");
+  rows.className = "timing-rows";
+  const total = Math.max(Number(data.total_ms || 0), 1);
+  for (const stage of data.stages) {
+    const row = document.createElement("div");
+    row.className = "timing-row";
+    const label = document.createElement("strong");
+    label.textContent = stage.label;
+    const bar = document.createElement("div");
+    bar.className = "timing-bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${Math.max(2, Math.min(100, (Number(stage.ms || 0) / total) * 100))}%`;
+    bar.append(fill);
+    const value = document.createElement("em");
+    value.textContent = `${(Number(stage.ms || 0) / 1000).toFixed(2)}s`;
+    row.append(label, bar, value);
+    rows.append(row);
+  }
+  container.append(rows);
+  const note = document.createElement("p");
+  note.className = "timing-note";
+  note.textContent = data.run_now
+    ? "立即演练：跳过倒计时，已到确认页，未点击“立即提交”，不会生成订单。"
+    : data.dry_run
+      ? "演练模式：已到确认页，未点击“立即提交”，不会生成订单。"
+      : data.submitted && data.submit_verified === false
+        ? "提交后仍停在确认页，可能未生效；请检查「立即提交」坐标或按钮状态，程序没有再补点。"
+        : data.submitted && data.submit_verified === true
+          ? "提交后已离开确认页，请在大麦订单记录中确认。"
+          : data.submitted === false
+            ? "自动提交关闭：耗时统计到确认页可读；页面跳转通常占 80% 以上。"
+            : data.flow === "fast"
+              ? "极速模式参考：1.6~2.4 秒；页面跳转通常占 80% 以上。"
+              : "普通模式参考：2.5~4.0 秒；票档 OCR、确认页读取和观演人勾选是主要开销。";
+  container.append(note);
+}
+
 function selectAndroidDevice(name) {
   const device = androidDevices.find((item) => item.name === name && item.online);
   if (!device) return;
@@ -273,6 +493,8 @@ async function refreshAndroidDevices() {
 }
 
 $("#android-device-name").addEventListener("change", (event) => selectAndroidDevice(event.target.value.trim()));
+$("#android-price").addEventListener("input", updateAndroidTotal);
+$("#android-ticket-count").addEventListener("input", updateAndroidTotal);
 $("#android-refresh-devices").addEventListener("click", refreshAndroidDevices);
 
 async function checkTimeSync() {
@@ -300,17 +522,19 @@ $("#android-time-sync").addEventListener("click", checkTimeSync);
 async function calibrateAndroidPoint() {
   const button = $("#android-calibrate");
   const hint = $("#android-calibrate-hint");
-  const defaultHint = hint.textContent;
   button.disabled = true;
   button.textContent = "识别中…";
   hint.textContent = "正在截图识别当前页面按钮…（首次约 5 秒，为 OCR 预热）";
   try {
-    const result = await api("/api/android/calibrate", { method: "POST" });
+    const result = await api("/api/android/calibrate", {
+      method: "POST",
+      body: JSON.stringify(readAndroidConfig()),
+    });
     fillAndroidConfig(result.config);
-    hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。${result.template_path ? " 已保存无 OCR 购买按钮模板。" : ""}`;
+    hint.textContent = `已在「${result.page}」识别到「${result.button}」，坐标 ${result.point} 已写入上方输入框并保存。${result.template_path ? " 已保存无 OCR 购买按钮模板。" : ""}${result.warning ? ` ${result.warning}` : ""}`;
     toast(`已采集「${result.button}」坐标 ${result.point}`);
   } catch (error) {
-    hint.textContent = `${error.message}（${defaultHint}）`;
+    hint.textContent = error.message;
     toast(error.message, true);
   } finally {
     button.disabled = false;
@@ -318,6 +542,31 @@ async function calibrateAndroidPoint() {
   }
 }
 $("#android-calibrate").addEventListener("click", calibrateAndroidPoint);
+
+async function calibrateNegativeTemplate() {
+  const button = $("#android-calibrate-negative");
+  const hint = $("#android-calibrate-hint");
+  button.disabled = true;
+  button.textContent = "识别中…";
+  hint.textContent = "正在识别「已预约 / 未开售」按钮并保存负向模板…";
+  try {
+    const result = await api("/api/android/calibrate-negative", {
+      method: "POST",
+      body: JSON.stringify(readAndroidConfig()),
+    });
+    fillAndroidConfig(result.config);
+    const name = String(result.template_path || "").split(/[\\/]/).pop();
+    hint.textContent = `已在「${result.page}」识别到「${result.button}」，负向模板 ${name} 已保存；开售后命中该模板会继续等待，不会误点。`;
+    toast(`已保存负向模板 ${name}`);
+  } catch (error) {
+    hint.textContent = error.message;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "采集「已预约」模板";
+  }
+}
+$("#android-calibrate-negative").addEventListener("click", calibrateNegativeTemplate);
 
 $("#config-form").addEventListener("submit", async (event) => {
   event.preventDefault();

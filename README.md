@@ -1,31 +1,6 @@
 # 大麦 PC / 安卓抢票工具
 
-本目录是唯一项目目录，包含 PC 与安卓抢票脚本、本地 Web 控制台、macOS / Windows 独立窗口应用及打包文件。
-
-## Windows 免安装安卓版
-
-Windows 包面向 Windows 10/11 x64，内嵌 Python、Node.js、ADB、Appium 和 UiAutomator2。独立窗口使用系统 Microsoft Edge WebView2 Runtime，Windows 10/11 通常已预装。
-
-GitHub Actions 的 `Build Windows package` 工作流会构建、验证并上传 `DamaiAndroid-windows-x64.zip` 和 SHA-256 文件。可从对应运行的 Artifacts 区域下载，也可手动运行工作流。
-
-在 Windows 开发机上安装 Python 3.12 并加入 `PATH`，然后本地构建：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-```
-
-脚本使用 `build\windows-venv` 安装构建依赖，产物为 `dist\DamaiAndroid-windows-x64.zip`。构建需要联网下载 `packaging/dependencies.env` 中固定版本和校验值对应的依赖。
-
-用户使用顺序：
-
-1. 完整解压 zip，保留 `DamaiAndroid` 目录内的全部文件，双击 `DamaiAndroid.exe`。
-2. 当前测试版没有 Authenticode 签名，SmartScreen 可能提示；确认文件来源后选择“更多信息”→“仍要运行”。
-3. 手机开启 USB 调试并连接电脑，在手机上允许调试授权。
-4. 在大麦 App 登录并完成原生预约，提前选好目标场次、票档和观演人，然后停在目标演出详情页。
-5. 在控制台检测设备，填写与预约一致的购票数量和北京时间抢购时间。首次使用保持自动提交关闭，并按提示完成三页按钮模板校准。
-6. 环境检查通过后开始抢票。关闭窗口会停止抢票 worker、控制台和 Appium，订单结果以大麦 App 的订单记录为准。
-
-配置保存在 `%LOCALAPPDATA%\DamaiAndroid\config.jsonc`，日志位于同目录的 `logs\`。升级应用不会主动覆盖用户配置。安卓功能限制、极速模式和校准要求与 Mac 版相同。
+本目录是唯一项目目录，包含 PC 与安卓抢票脚本、本地 Web 控制台、macOS 独立窗口应用及 DMG 打包文件。
 
 ## Mac DMG 安卓版
 
@@ -51,9 +26,9 @@ DMG 仅包含安卓功能，面向 Apple 芯片 Mac，内嵌 Python、Node.js、
 
 安卓端仅支持原生预约快路：正面确认“立即购买”状态后点击底栏，核对确认页金额和已选观演人数，不修改预约选择；不符合预期时停止，自动提交最多点击一次，不自动重试。过期时间不会补点购买。金额只做有效性检查，场次和票档以大麦预约结果为准。不支持预约的场次无法使用安卓端。使用时保持 Mac 与手机唤醒，并在系统中启用自动设置时间。
 
-极速模式只使用内置 Scrcpy 实时视频帧和购买按钮正面模板感知 Canvas 自绘按钮，不执行 OCR。区域像素变化只触发模板比较，不代表可购买；只有匹配“立即预订/立即购票/立即购买”模板才点击。模板缺失、画面未知或匹配超时时停止，不降级到 OCR，也不会因到点而盲点“已预约”。底栏、确定、提交由目标 Activity 与对应模板共同驱动，各只点击一次；提交指令发出后不等待 Activity 离开。
+极速模式只使用内置 Scrcpy 实时视频帧和购买按钮正面模板感知 Canvas 自绘按钮，不执行 OCR。区域像素变化只触发模板比较，不代表可购买；只有同时满足“匹配立即预订/立即购票/立即购买模板”和“按钮区域已着色”才点击。进入下单流程后，票档页和确认页的首帧由常驻 `adb logcat` 的 `START`/`Displayed` 事件感知，不再用 20~30ms 一次的 `dumpsys` 轮询；点击/返回类 adb 命令超时不会重放，避免确认页被重复提交。灰度模板只认字形，所以必须加着色判断，避免把灰暗的“未开售/已预约”底栏当成可购买；部分页面“已预约”底栏也是橙色，颜色判断不能单独作为放行依据。模板在开售时刻前命中时会等到开售时刻再点，因为大麦会忽略开售前的底栏点击。开售时刻后如果所有模板都没命中，但底栏相对开售前发生了稳定的大幅翻转，会自动补采当前按钮为新模板并立即放行；模板在后台线程落盘，不占点击路径。模板缺失、画面未知或匹配超时时停止，不降级到 OCR，也不会在底栏没有变化时因到点而盲点“已预约”。
 
-首次使用需要依次完成三页模板校准：可购买详情页的“立即预订/立即购票/立即购买”、票档页的“确定”、确认页的“立即提交”。在每页点击“采集当前页按钮坐标”，分别生成 `buy.png`、`confirm.png`、`submit.png`，三个模板齐全才能使用极速模式。只有正面识别到对应按钮文案时才保存模板；在“已预约”页面通过容器兜底采集坐标不会生成模板。
+首次使用需要模板校准：在大麦中打开一个已经显示“立即预订/立即购票/立即购买”的详情页，点击控制台的“采集当前页按钮坐标”。只有正面识别到可购买文案时才保存无 OCR 模板；在“已预约”页面通过容器兜底采集坐标不会生成模板。再打开显示“已预约/未开售”的详情页，点击“采集「已预约」模板”，会把负向模板保存为 `negative-<状态>.png`；开售后底栏命中负向模板时拒绝放行，避免误点灰色底栏。旧版本手动放入的 `negative-yuyue.png` 同样兼容。
 
 小米手机如果提示 `Appium Settings app is not running`，请在系统的 Appium Settings 权限页允许“后台弹出界面”，然后重试。
 
@@ -74,6 +49,54 @@ python3 -m venv .venv
 ```
 
 服务只监听本机地址，不接收账号密码。开发模式默认直接控制本项目的 `damai/` 和 `damai_appium/`。
+
+## Windows 免安装包（仅 PC）
+
+在 macOS/Linux 上可组装 Windows 免安装版，产物不需要目标机安装 Python：
+
+```bash
+./packaging/build_windows_portable.sh
+# 产物：dist/ticket-purchase-windows-pc/ 和 dist/ticket-purchase-windows-pc.zip
+```
+
+把 zip 拷到 Windows 10/11 解压，双击 `启动抢票.bat` 即可。包内使用官方嵌入式 Python 3.12、win_amd64 依赖，以及与 ChromeDriver 同版本的 Chrome for Testing，因此目标机不需要安装 Python、Chrome 或驱动；配置与 Cookie 都保存在解压目录内。
+
+该包只包含 PC 抢票组件，不包含 Appium、adb、Node.js，因此安卓入口不可用。启动脚本会带 `--pc-only`，控制台只显示 PC 表单；需要完整安卓功能时请使用 macOS 的 DMG，或下载 `DamaiAndroid-windows-x64.zip`。
+
+### 用 GitHub Actions 构建 Windows 包
+
+仓库内置 `.github/workflows/build-windows-pc.yml`，在 GitHub 的 Windows 机器上执行同一套组装脚本：
+
+1. 推送到 `feature_yuyue` 分支（或手动触发 `Build Windows PC Package`）。
+2. 打开 Actions 中该次运行，等待 `build` 任务通过。
+3. 在页面底部 Artifacts 下载 `ticket-purchase-windows-pc`，解压一次即得到 `ticket-purchase-windows-pc/` 目录，拷到 Windows 后双击其中的 `启动抢票.bat`。
+
+工作流会缓存嵌入式 Python 和 Chrome for Testing 下载，并用包内自带的 `python.exe` 做导入冒烟测试（`selenium`、`android_prewarm`、`app`），失败时不会产出包。
+
+## Windows 免安装包（安卓版）
+
+`.github/workflows/build-windows-android.yml` 在 GitHub Actions 的 Windows 机器上用 PyInstaller 构建安卓版：
+
+1. 推送到 `feature_yuyue` 分支，或手动触发 `Build Windows Android App`。
+2. 等待构建与验证步骤通过。
+3. 下载 Artifact `DamaiAndroid-windows-x64`，解压后双击 `DamaiAndroid.exe`。
+
+本机 Windows 也可以直接构建：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_windows_android.ps1
+```
+
+产物为 `dist/DamaiAndroid-windows-x64.zip`，包内自带 Python 3.12、Node.js、ADB、Appium 3.9 和 UiAutomator2 驱动，目标机不需要安装任何依赖。配置、日志和首次启动时复制的 Appium 驱动保存在 `%LOCALAPPDATA%\DamaiAndroid`。
+
+打包脚本会清空开发机残留：产物中不包含 `config.json`、`config.jsonc`、`damai_cookies.pkl`、校准模板、日志或 `.runtime`，首次启动就是空配置。构建和验证阶段都会检查，一旦发现残留会直接失败。已经使用过的旧版本不会被清空，需要重置时手动删除 `%LOCALAPPDATA%\DamaiAndroid`。
+
+- 窗口由系统 WebView2 渲染：Windows 11 已内置，Windows 10 可能需安装 Microsoft Edge WebView2 Runtime。
+- 程序未做代码签名，首次运行可能触发 SmartScreen，需要选择“更多信息 → 仍要运行”。
+- 工作流会从最终 zip 隔离启动应用，验证控制台、内置 Appium 和安卓配置接口可用，不连接真机、不执行真实抢票。
+- 关闭窗口会停止抢票任务、控制台和内置 Appium。
+
+macOS DMG 的构建流程（`packaging/build_dmg.sh`、`packaging/DamaiAndroid.spec`）保持不变，同一个 spec 会按平台生成 `.app` 或 Windows onedir。
 
 ### PC 使用顺序
 
@@ -96,17 +119,19 @@ appium --address 127.0.0.1 --port 4723
 
 用 `adb devices` 确认设备在线，输出第一列就是控制台需要填写的设备名。在控制台选择“安卓”，填写设备、购票数量和抢购时间，保存后点击“检查安卓环境”。检查通过后再开始；程序会自动等待到设定时间，关闭自动提交时，脚本会停在订单确认页。
 
+控制台还提供“网络测试”和“设备性能测试”：前者只读 ping、丢包、抖动与 Wi-Fi 信号，后者只读内存、温度、动画、帧率和大麦进程状态，都不会修改设备。每次抢票结束后会输出分段耗时表和一行 `[TIMING]` JSON，页面据此展示普通模式/极速模式的放行、票档页、确认页与提交耗时。
+
 安卓配置写入 `damai_appium/config.jsonc`。源码 Web 模式不会管理外部 Appium 服务，也不会把 PC Cookie 用作安卓登录态。
 
 ## 订单结果
 
 页面展示的是进程状态，不代表订单结果。观演人必须显示已勾选；无论是否开启自动提交，都要在大麦订单记录中确认是否生成待支付订单，并及时处理。
 
-## 测试与打包验证
+## 测试与 DMG 验证
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m pytest tests/test_damai_app_v2.py -q --no-cov
+.venv/bin/python -m pytest tests/test_flip_watch.py -q --no-cov
 ```
 
 从实际 DMG 做隔离启动验证：
@@ -115,12 +140,6 @@ appium --address 127.0.0.1 --port 4723
 .venv/bin/python packaging/verify_dmg.py
 .venv/bin/python packaging/verify_dmg.py --window
 .venv/bin/python packaging/verify_dmg.py --early-exit
-```
-
-Windows 构建脚本会自动从最终 zip 解压并做隔离启动验证，也可手动重复：
-
-```powershell
-build\windows-venv\Scripts\python.exe packaging\verify_windows.py
 ```
 
 验证脚本使用独立测试数据目录和 ADB 端口，不启动真实抢票。真机验证需要单独连接已授权的安卓设备。
@@ -133,9 +152,9 @@ ticket-purchase/
 ├── damai_appium/      # 安卓抢票
 ├── static/            # 本地控制台页面
 ├── tests/             # 控制台与抢票测试
-├── packaging/         # macOS / Windows 构建和验证
+├── packaging/         # DMG 构建和验证
 ├── docs/              # 设计与截图
 ├── app.py             # Web 控制台
-├── desktop_app.py     # 桌面独立窗口与 worker 入口
+├── desktop_app.py     # macOS 独立窗口与 worker 入口
 └── start_web.sh       # 开发模式启动
 ```
