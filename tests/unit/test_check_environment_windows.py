@@ -2,7 +2,14 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from damai import check_environment
+
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32", reason="Windows Chrome 路径依赖 Windows 路径分隔符"
+)
 
 
 WINDOWS_CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"

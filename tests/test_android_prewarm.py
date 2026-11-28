@@ -56,6 +56,7 @@ def test_prewarm_refuses_reserved_target_page(mocker):
         "_ocr_rows",
         return_value=[(400, 2557, "已预约"), (600, 2600, "即将开抢")],
     )
+    mocker.patch.object(android_prewarm, "_screen_height", return_value=2712)
     tap = mocker.patch.object(android_prewarm, "_tap")
 
     result = android_prewarm.prewarm_ticket_page("fake", buy_point="765,2556")
@@ -87,6 +88,7 @@ def test_prewarm_stops_when_native_sku_does_not_open(mocker):
         "_ocr_rows",
         return_value=[(760, 2556, "立即预订")],
     )
+    mocker.patch.object(android_prewarm, "_screen_height", return_value=2712)
     mocker.patch.object(android_prewarm, "_tap")
     mocker.patch.object(
         android_prewarm,

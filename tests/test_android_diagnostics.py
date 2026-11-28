@@ -125,7 +125,8 @@ def test_network_report_marks_good_network_as_pass():
             return "off\n", ""
         return "", ""
 
-    with patch.object(diag, "_safe_run", side_effect=fake_run):
+    with patch("android_diagnostics.shutil.which", return_value="/usr/bin/adb"), \
+         patch.object(diag, "_safe_run", side_effect=fake_run):
         report = diag.network_report("device-1")
 
     assert report["ok"] is True
@@ -146,7 +147,8 @@ def test_network_report_flags_bad_rtt_and_loss():
             )
         return "", ""
 
-    with patch.object(diag, "_safe_run", side_effect=fake_run):
+    with patch("android_diagnostics.shutil.which", return_value="/usr/bin/adb"), \
+         patch.object(diag, "_safe_run", side_effect=fake_run):
         report = diag.network_report("device-1")
 
     assert report["ok"] is False
@@ -194,7 +196,8 @@ def test_performance_report_summarizes_device_metrics():
             return "  1.5% 1234/cn.damai: 1.0% user + 0.5% kernel\n", ""
         return "", ""
 
-    with patch.object(diag, "_safe_run", side_effect=fake_run):
+    with patch("android_diagnostics.shutil.which", return_value="/usr/bin/adb"), \
+         patch.object(diag, "_safe_run", side_effect=fake_run):
         report = diag.performance_report("device-1")
 
     assert report["ok"] is True
@@ -218,7 +221,8 @@ def test_performance_report_flags_hot_and_low_memory():
             return "Thermal Status: 3\n", ""
         return "", ""
 
-    with patch.object(diag, "_safe_run", side_effect=fake_run):
+    with patch("android_diagnostics.shutil.which", return_value="/usr/bin/adb"), \
+         patch.object(diag, "_safe_run", side_effect=fake_run):
         report = diag.performance_report("device-1")
 
     assert report["ok"] is False
